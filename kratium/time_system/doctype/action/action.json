@@ -67,6 +67,15 @@
    "unique": 1
   },
   {
+   "fieldname": "estimated_hours",
+   "fieldtype": "Data",
+   "label": "Estimated Hours"
+  },
+  {
+   "fieldname": "column_break_ggqb",
+   "fieldtype": "Column Break"
+  },
+  {
    "fieldname": "start_date",
    "fieldtype": "Date",
    "in_list_view": 1,
@@ -79,22 +88,13 @@
    "in_list_view": 1,
    "label": "End Date",
    "reqd": 1
-  },
-  {
-   "fieldname": "estimated_hours",
-   "fieldtype": "Data",
-   "label": "Estimated Hours"
-  },
-  {
-   "fieldname": "column_break_ggqb",
-   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-18 11:02:17.508254",
+ "modified": "2025-12-18 13:22:44.626349",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

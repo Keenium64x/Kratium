@@ -7,17 +7,29 @@ import frappe
 
 
 @frappe.whitelist(allow_guest=True)
-def get_final_action_list():
+def get_final_action_list(view_mode):
     actions = frappe.db.sql("""
     SELECT
         name,
         parent_action,
-        estimated_hours
+        estimated_hours,
+        start_date,
+        end_date
     FROM
         `tabAction`
     """, as_dict=True)
         
-    hours_in_month = 720
+    view_mode = (view_mode or "").strip('"')
+
+    if view_mode == "Year":
+        hour_condition = 720
+    elif view_mode == "Month":
+        hour_condition = 24
+    elif view_mode == "Day":
+        hour_condition = 1
+    else:
+        frappe.throw("Invalid view_mode")
+
     parent_node = {}
     parent_node_lft = int
     parent_node_rgt = int
@@ -51,7 +63,7 @@ def get_final_action_list():
         siblings = get_siblings(node)
 
         # FAIL CASE → stop here, add parent, do NOT recurse
-        if any(int(a["estimated_hours"]) < hours_in_month for a in siblings):
+        if any(int(a["estimated_hours"]) < hour_condition for a in siblings):
             parent_name = node["parent_action"]
             for a in actions:
                 if a["name"] == parent_name:
@@ -62,7 +74,7 @@ def get_final_action_list():
         leaf_siblings = [s for s in siblings if not get_children(s)]
 
         for sibling in leaf_siblings:
-            if int(sibling["estimated_hours"]) > hours_in_month:
+            if int(sibling["estimated_hours"]) > hour_condition:
                 final_action.add(sibling["name"])
 
 
@@ -73,8 +85,16 @@ def get_final_action_list():
 
     complete_node_condition(parent_node)
 
-    # materialize result
-    return {
-        "count": len(final_action),
-        "actions": final_action,
-    }
+    
+    final_object = []
+    for action in actions:
+        if action["name"] in final_action:
+            final_object.append(
+                {
+                    "id": action["name"],
+                    "start": action["start_date"],
+                    "end": action["end_date"],
+                }
+            )
+
+    return final_object
