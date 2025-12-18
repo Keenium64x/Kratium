@@ -1,1 +1,4 @@
 Kratium
+Time System
+Knowledge System
+Planning System
