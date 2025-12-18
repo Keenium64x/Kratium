@@ -1,6 +1,6 @@
 <template>
   <div class="flex-col">
-    <div class="flex justify-center gap-x-4">
+    <div class="flex justify-center gap-x-4 mt-6 mb-4">
       <Button
       :variant="'outline'"
       theme="gray"
@@ -32,16 +32,16 @@
       Daily
     </Button>
   </div>
-<div class="relative w-full overflow-hidden" :style="{ height: ganttHeight + 'px' }">
+<div :style="{ height: ganttHeight + 'px' }" class="mt-0">
   <div
     id="gantt"
     v-show="!ganttLoading"
-    class="w-full h-full"
+    class=" h-full m-10 rounded-xl border mt-2"
   ></div>
 
   <div
     v-if="ganttLoading"
-    class="absolute inset-0 flex items-center justify-center pointer-events-none"
+    class="flex items-center justify-center pointer-events-none"
   >
     <LoadingText class="text-5xl scale-150" />
   </div>
@@ -74,7 +74,7 @@ watch(view, async () => {
 })
 
 let gantt = null
-const ganttHeight = 900
+const ganttHeight = 600
 
 onMounted(()=>{
     let final_actions_initial = createResource({
