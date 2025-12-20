@@ -11,6 +11,9 @@
   "start_date",
   "end_date",
   "estimated_hours",
+  "event",
+  "full_day",
+  "color",
   "column_break_ggqb",
   "lft",
   "rgt",
@@ -77,24 +80,43 @@
   },
   {
    "fieldname": "start_date",
-   "fieldtype": "Date",
+   "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Start Date",
    "reqd": 1
   },
   {
    "fieldname": "end_date",
-   "fieldtype": "Date",
+   "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "End Date",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "event",
+   "fieldtype": "Check",
+   "label": "Event?"
+  },
+  {
+   "default": "0",
+   "fieldname": "full_day",
+   "fieldtype": "Check",
+   "label": "Full Day?",
+   "read_only": 1
+  },
+  {
+   "fieldname": "color",
+   "fieldtype": "Select",
+   "label": "Color",
+   "options": "amber\nviolet\npink\ncyan\nblue\norange\ngreen"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-18 13:22:44.626349",
+ "modified": "2025-12-20 23:37:54.903362",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

@@ -8,9 +8,15 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    Calendar: typeof import('./src/components/Calendar.vue')['default']
+    EditEventForm: typeof import('./src/components/EditEventForm.vue')['default']
     Gantt: typeof import('./src/components/Gantt.vue')['default']
+    NewEventForm: typeof import('./src/components/NewEventForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./src/components/Sidebar.vue')['default']
+    Test: typeof import('./src/components/test.vue')['default']
+    ValFormControl: typeof import('./src/components/ValFormControl.vue')['default']
+    ValidationFormControl: typeof import('./src/components/ValidationFormControl.vue')['default']
   }
 }

@@ -14,11 +14,15 @@
     "copy-html-entry": "cp ../kratium/public/frontend/index.html ../kratium/www/frontend.html"
   },
   "dependencies": {
+    "@vee-validate/yup": "^4.15.1",
     "feather-icons": "^4.29.2",
     "frappe-ui": "^0.1.192",
+    "mitt": "^3.0.1",
     "socket.io-client": "^4.7.2",
+    "vee-validate": "^4",
     "vue": "^3.5.13",
-    "vue-router": "^4.5.0"
+    "vue-router": "^4.5.0",
+    "yup": "^1.7.1"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",

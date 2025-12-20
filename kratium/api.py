@@ -1,20 +1,23 @@
 import frappe
+from datetime import datetime
 
 
 
 
 
 
-
-@frappe.whitelist(allow_guest=True)
-def get_final_action_list(view_mode):
+@frappe.whitelist()
+def get_final_action_list(view_mode, calendar):
     actions = frappe.db.sql("""
     SELECT
         name,
         parent_action,
         estimated_hours,
         start_date,
-        end_date
+        end_date,
+        event,
+        full_day,
+        color
     FROM
         `tabAction`
     """, as_dict=True)
@@ -87,14 +90,49 @@ def get_final_action_list(view_mode):
 
     
     final_object = []
-    for action in actions:
-        if action["name"] in final_action:
-            final_object.append(
-                {
-                    "id": action["name"],
-                    "start": action["start_date"],
-                    "end": action["end_date"],
-                }
-            )
+    if calendar == False:
+        for action in actions:
+            if action["name"] in final_action:
+                final_object.append(
+                    {
+                        "id": action["name"],
+                        "start": action["start_date"],
+                        "end": action["end_date"],
+                    }
+                )
+    else:
+        formatted_actions = []
+        for a in actions:
+            start = a["start_date"]
+            end = a["end_date"]
+
+            item = dict(a)  # copy original
+            item["fromDate"] = start.strftime("%Y-%m-%d")
+            item["toDate"] = end.strftime("%Y-%m-%d")
+            item["fromTime"] = start.strftime("%H:%M")
+            item["toTime"] = end.strftime("%H:%M")
+
+            formatted_actions.append(item)
+
+
+        for action in formatted_actions:
+            if action["event"] == True:
+                final_object.append(
+                    {
+                        "title": action["name"],
+                        "id: ": action["name"],
+                        "fromDate": action["fromDate"],
+                        "toDate": action["toDate"],
+                        "fromTime": action["fromTime"],
+                        "toTime": action["toTime"],
+                        "color": action["color"],
+                        "isFullDay": action["full_day"]
+
+                    }
+                )        
 
     return final_object
+
+
+
+

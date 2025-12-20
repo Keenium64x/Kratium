@@ -45,6 +45,7 @@
   >
     <LoadingText class="text-5xl scale-150" />
   </div>
+  
 </div>
   </div>
 </template>
@@ -77,10 +78,11 @@ let gantt = null
 const ganttHeight = 600
 
 onMounted(()=>{
-    let final_actions_initial = createResource({
+  let final_actions_initial = createResource({
   url: '/api/method/kratium.api.get_final_action_list',
   params:{
-    view_mode: view.value
+    view_mode: view.value,
+    calendar: false
   }
 })
   ganttLoading.value = true
@@ -111,10 +113,11 @@ onMounted(()=>{
 
 
 function updateGantt(){
-    let final_actions_refresh = createResource({
+  let final_actions_refresh = createResource({
   url: '/api/method/kratium.api.get_final_action_list',
   params:{
-    view_mode: view.value
+    view_mode: view.value,
+    calendar: false
   }
 })
   ganttLoading.value = true
