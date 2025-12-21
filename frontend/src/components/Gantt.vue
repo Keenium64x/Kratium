@@ -83,7 +83,8 @@ onMounted(()=>{
   params:{
     view_mode: view.value,
     calendar: false
-  }
+  },
+  cache: "final-actions"
 })
   ganttLoading.value = true
   final_actions_initial.fetch().then(() => {
@@ -102,11 +103,11 @@ onMounted(()=>{
     gantt = new Gantt('#gantt', tasks, {
       container_height: ganttHeight,
       view_mode: view.value,
-      readonly: true
+      readonly: true,
+      scroll_to: "today"
     })
 })
 })
-
 
 
 
@@ -118,7 +119,8 @@ function updateGantt(){
   params:{
     view_mode: view.value,
     calendar: false
-  }
+  },
+
 })
   ganttLoading.value = true
   final_actions_refresh.fetch().then(() => {

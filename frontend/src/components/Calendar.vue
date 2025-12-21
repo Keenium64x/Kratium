@@ -68,29 +68,34 @@ emitter.on('event-update', async () => {
     events.value = calendarActions.data
 })
 
-let updateEventfunc = createDocumentResource({
-doctype: 'Action',
-name: "Event", 
-})
 
-console.log(updateEventfunc.doc)
 
-//update sync
-async function sendUpdate(event){
-  updateEventfunc.update({
-    doctype: '',
-    name: ''
+// update sync
+async function sendUpdate(event) {
+  const url = `/api/v2/document/Action/${event.title}`
+
+  const payload = {
+    name1: event.title,
+    start_date: event.fromDateTime,
+    end_date: event.toDateTime,
+    color: event.color,
+    full_day: event.isFullDay,
+  }
+
+  const res = await fetch(url, {
+    method: 'PUT', 
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    credentials: 'include', 
   })
 
-  updateEventfunc.setValue.submit({
-  name1: event.title,
-  start_date: event.fromDateTime,
-  end_date: event.toDateTime,
-  color: event.color,
-  full_day: event.isFullDay,
-})    
+  if (!res.ok) {
+    throw new Error(await res.text())
+  }
 
-
+  return await res.json()
 }
 
 
@@ -124,14 +129,25 @@ onBeforeUnmount(() => {
   observer?.disconnect()
 })
 
-function onModeChange(mode) {
-  let final_actions_refresh = createResource({
-  url: '/api/method/kratium.api.get_final_action_list',
-  params:{
-    view_mode: "Day",
-    calendar: false
-  }
+//Load Daily
+let dailyActions = createResource({
+url: '/api/method/kratium.api.get_final_action_list',
+params:{
+  view_mode: "Day",
+  calendar: true
+},
 })
+dailyActions.fetch()
+
+async function onModeChange(mode) {
+if (mode === 'Day' || mode === 'Week') {
+    events.value = dailyActions.data
+}
+  else{
+      events.value = calendarActions.data
+
+}
+    
 }
 
 </script>

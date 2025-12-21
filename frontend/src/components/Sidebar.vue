@@ -11,9 +11,9 @@
 import { Sidebar } from 'frappe-ui'
 
 const header = {
-  title: 'My App',
-  subtitle: 'John Doe',
-    logo: 'https://raw.githubusercontent.com/frappe/crm/develop/.github/logo.svg',
+  title: 'Kratium',
+  subtitle: 'Keenan System',
+    logo: '/Kratium Icon.jpg',
   menuItems: [
     {
       label: 'Toggle Theme',
@@ -28,31 +28,13 @@ const sections = [
   {
     items: [
       {
-        label: 'Dashboard',
-        to: '/',
-              onClick() {
-                console.log("click")
-      },
+        label: "Gantt",
+        to: "/gantt"
       },
       {
-        label: 'Tasks',
-        to: "/",                // Route (vue-router)
-        onClick: () => {console.log("click")},   // Action instead of route
-        // 
-        onClick() {
-        console.log("click")
-      },
-      },
-    ],
-  },
-  {
-    label: 'Views',
-    collapsible: true,
-    items: [
-      {
-        label: 'My Tasks',
-        to: '/account/login',
-      },
+        label: "Calendar",
+        to: "/calendar"
+      }      
     ],
   },
 ]

@@ -1,29 +1,10 @@
 import frappe
-from datetime import datetime
-
-
-
-
 
 
 @frappe.whitelist()
 def get_final_action_list(view_mode, calendar):
-    actions = frappe.db.sql("""
-    SELECT
-        name,
-        parent_action,
-        estimated_hours,
-        start_date,
-        end_date,
-        event,
-        full_day,
-        color
-    FROM
-        `tabAction`
-    """, as_dict=True)
-        
-    view_mode = (view_mode or "").strip('"')
 
+    view_mode = (view_mode or "").strip('"')
     if view_mode == "Year":
         hour_condition = 720
     elif view_mode == "Month":
@@ -33,94 +14,122 @@ def get_final_action_list(view_mode, calendar):
     else:
         frappe.throw("Invalid view_mode")
 
-    parent_node = {}
-    parent_node_lft = int
-    parent_node_rgt = int
-    parent_node_name = ""
+    top_actions = frappe.qb.get_query(
+            "Action",
+            fields=["name", "estimated_hours", "parent_action"],
+            filters={"parent_action": None}
+        ).run(as_dict=True)
 
 
 
-    # Find the first root node
-    for d in actions:
-        if d["parent_action"] is None:
-            parent_node = d
-            parent_node_name = d["name"]
-            break  # stop at the first one found
 
-
-
-    final_action = set()  # use set to guarantee uniqueness
-
+    final_actions = []
+    #Fetching Functions
+    def get_children(node):
+        return frappe.qb.get_query(
+            "Action",
+            fields=["name", "estimated_hours", "parent_action"],
+            filters={"parent_action": node["name"]}
+        ).run(as_dict=True)
+  
+    def get_parent(node):
+        return frappe.qb.get_query(
+            "Action",
+            fields=["name", "estimated_hours", "parent_action"],
+            filters={"name": node["parent_action"]}
+        ).run(as_dict=True)
 
     def get_siblings(node):
-        if node["parent_action"] is None:
-            return [node]
-        return [a for a in actions if a["parent_action"] == node["parent_action"]]
+        return frappe.qb.get_query(
+            "Action",
+            fields=["name", "estimated_hours", "parent_action"],
+            filters={
+                "parent_action": node["parent_action"],
+            }
+        ).run(as_dict=True)
+
+    #Validation Function
+    def is_leaf(node):
+        return get_children(node) == [] 
+
+    def validify_action_level(nodes):
+        fail_con = False
+        for node in nodes:
+            if int(node["estimated_hours"]) < hour_condition:
+                fail_con = True
+        if fail_con is True:
+            parent_fail = get_parent(nodes[0])
+            if parent_fail[0] not in final_actions:
+                final_actions.append(parent_fail[0])
+            return False
+        else:
+            for action in nodes:
+                if is_leaf(action) and int(action["estimated_hours"]) > hour_condition and action not in final_actions:
+                    final_actions.append(action)
+            return True
+        
+
+    #node process
+    def tree_walk(node):
+        if isinstance(node, list):
+            for top_node in node:
+                if top_node["parent_action"] is None:
+                    initial_nodes = get_children(top_node)
+                    tree_walk(initial_nodes[0])
+        else:
+            siblings = get_siblings(node)
+            if validify_action_level(siblings):
+                for action in siblings:
+                    childrenList = get_children(action)
+                    for children in childrenList:
+                        tree_walk(children)
+
+    tree_walk(top_actions)
+
+    final_action_name = [action["name"] for action in final_actions]
+    condition_actions = frappe.qb.get_query(
+    "Action",
+    fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+    filters={"name": ["in", final_action_name]}
+    ).run(as_dict=True) 
 
 
-    def get_children(node):
-        return [a for a in actions if a["parent_action"] == node["name"]]
+    event_actions = frappe.qb.get_query(
+        "Action",
+        fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+        filters={"event": 1}
+    ).run(as_dict=True) 
 
 
-    def complete_node_condition(node):
-        siblings = get_siblings(node)
-
-        # FAIL CASE → stop here, add parent, do NOT recurse
-        if any(int(a["estimated_hours"]) < hour_condition for a in siblings):
-            parent_name = node["parent_action"]
-            for a in actions:
-                if a["name"] == parent_name:
-                    final_action.add(a["name"])
-            return  # <-- THIS was missing conceptually
-
-        #Endcase if final node and valid
-        leaf_siblings = [s for s in siblings if not get_children(s)]
-
-        for sibling in leaf_siblings:
-            if int(sibling["estimated_hours"]) > hour_condition:
-                final_action.add(sibling["name"])
-
-
-        for sibling in siblings:
-            for child in get_children(sibling):
-                complete_node_condition(child)
-
-
-    complete_node_condition(parent_node)
-
-    
     final_object = []
     if calendar == False:
-        for action in actions:
-            if action["name"] in final_action:
-                final_object.append(
-                    {
-                        "id": action["name"],
-                        "start": action["start_date"],
-                        "end": action["end_date"],
-                    }
-                )
+        for action in condition_actions:
+            final_object.append(
+                {
+                    "id": action["name"],
+                    "start": action["start_date"],
+                    "end": action["end_date"],
+                }
+            )
     else:
-        formatted_actions = []
-        for a in actions:
-            start = a["start_date"]
-            end = a["end_date"]
+        if view_mode == "Day":
+            formatted_condition_actions = []
+            for a in condition_actions:
+                start = a["start_date"]
+                end = a["end_date"]
 
-            item = dict(a)  # copy original
-            item["fromDate"] = start.strftime("%Y-%m-%d")
-            item["toDate"] = end.strftime("%Y-%m-%d")
-            item["fromTime"] = start.strftime("%H:%M")
-            item["toTime"] = end.strftime("%H:%M")
+                item = dict(a) 
+                item["fromDate"] = start.strftime("%Y-%m-%d")
+                item["toDate"] = end.strftime("%Y-%m-%d")
+                item["fromTime"] = start.strftime("%H:%M")
+                item["toTime"] = end.strftime("%H:%M")
 
-            formatted_actions.append(item)
-
-
-        for action in formatted_actions:
-            if action["event"] == True:
+                formatted_condition_actions.append(item)            
+            for action in formatted_condition_actions:
                 final_object.append(
                     {
                         "title": action["name"],
-                        "id: ": action["name"],
+                        "id": action["name"],
                         "fromDate": action["fromDate"],
                         "toDate": action["toDate"],
                         "fromTime": action["fromTime"],
@@ -130,6 +139,35 @@ def get_final_action_list(view_mode, calendar):
 
                     }
                 )        
+        else:
+            formatted_event_actions = []
+            for a in event_actions:
+                start = a["start_date"]
+                end = a["end_date"]
+
+                item = dict(a) 
+                item["fromDate"] = start.strftime("%Y-%m-%d")
+                item["toDate"] = end.strftime("%Y-%m-%d")
+                item["fromTime"] = start.strftime("%H:%M")
+                item["toTime"] = end.strftime("%H:%M")
+
+                formatted_event_actions.append(item)
+
+            for action in formatted_event_actions:
+                if action["event"] == True:
+                    final_object.append(
+                        {
+                            "title": action["name"],
+                            "id": action["name"],
+                            "fromDate": action["fromDate"],
+                            "toDate": action["toDate"],
+                            "fromTime": action["fromTime"],
+                            "toTime": action["toTime"],
+                            "color": action["color"],
+                            "isFullDay": action["full_day"]
+
+                        }
+                    )        
 
     return final_object
 

@@ -1,5 +1,6 @@
 from frappe.utils.nestedset import NestedSet
 from datetime import datetime
+import frappe
 
 DT_FMT  = "%Y-%m-%d %H:%M:%S"
 DT_FMT2 = "%Y-%m-%d %H:%M"
@@ -25,4 +26,7 @@ class Action(NestedSet):
     def before_save(self):
         hours = hour_diff(self.start_date, self.end_date)
         self.estimated_hours = hours
-        self.full_day = hours >= 24
+        if hours > 24:
+            self.full_day = True
+        else:
+            self.full_day = False

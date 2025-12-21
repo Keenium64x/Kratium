@@ -39,7 +39,17 @@
             v-bind="eventPersonAttrs"
             />
             <ErrorMessage :message="errors.eventPerson" class="!my-4" />
-            
+
+            <FormControl 
+            type="text"
+            size="sm"
+            variant="subtle"
+            placeholder="John Doe"
+            label="Event Venue"
+            v-model="eventVenue"
+            v-bind="eventVenueAttrs"
+            />  
+
             <FormControl 
             type="date"
             size="sm"
@@ -49,6 +59,7 @@
             v-model="eventStartDate"
             v-bind="eventStartDateAttrs"
             />
+            <ErrorMessage :message="errors.eventStartDate" class="!my-4" />
             <FormControl 
             type="date"
             size="sm"
@@ -58,15 +69,40 @@
             v-model="eventEndDate"
             v-bind="eventEndDateAttrs"
             />
-            <FormControl 
-            type="text"
-            size="sm"
+            <ErrorMessage :message="errors.eventEndDate" class="!my-4" />
+
+            <p class="block text-xs text-ink-gray-5 !mt-6">Start Time</p>
+            <TimePicker
+            class="!my-4"
+            v-model="eventStartTime"
+            v-bind="eventStartTimeAttrs"
             variant="subtle"
-            placeholder="John Doe"
-            label="Event Venue"
-            v-model="eventVenue"
-            v-bind="eventVenueAttrs"
+            :interval="15"
+            :allowCustom="true"
+            :autoClose="true"
+            :use12Hour="false"
+            placement="bottom-start"
+            placeholder="Start Time"
+            scrollMode="center"
             />
+            <ErrorMessage :message="errors.eventStartTime" class="!my-4" />
+
+            <p class="block text-xs text-ink-gray-5 !mt-6">End Time</p>
+            <TimePicker
+            class="!my-4"
+            v-model="eventEndTime"
+            v-bind="eventEndTimeAttrs"
+            variant="subtle"
+            :interval="15"
+            :allowCustom="true"
+            :autoClose="true"
+            :use12Hour="false"
+            placement="bottom-start"
+            placeholder="End Time"
+            scrollMode="center"
+            />            
+            <ErrorMessage :message="errors.eventEndTime" class="!my-4" />
+
             <FormControl 
             type="select"
             :options="[
@@ -106,7 +142,6 @@
             v-bind="eventColorAttrs"
             />
             <ErrorMessage :message="errors.eventColor" class="!my-4" />
-            
         </div>
     </template>
     </Dialog>
@@ -114,7 +149,7 @@
 </template>
 <script setup>
 import {ref, watch} from 'vue'
-import { ErrorMessage, createDocumentResource } from 'frappe-ui'
+import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
 import {emitter} from '../event-bus'
@@ -129,6 +164,11 @@ const editFormSchema = yup.object({
   eventVenue: yup.string(),
   eventColor: yup.string().required().label("Color"),
   eventPerson: yup.string(),
+
+  eventStartDate: yup.date().nullable().typeError('Start Date is required').required('Start Date is required').label("Start Date"),
+  eventEndDate: yup.date().nullable().typeError('End Date is required').required('End Date is required').label("End Date"),
+  eventStartTime: yup.string().required().label("Start Time"),
+  eventEndTime: yup.string().required().label("End Time"),
 })
 
 const { values, errors, defineField, handleSubmit, setValues } = useForm({
@@ -139,6 +179,8 @@ const [eventName, eventNameAttrs] = defineField('eventName')
 const [eventPerson, eventPersonAttrs] = defineField('eventPerson')
 const [eventStartDate, eventStartDateAttrs] = defineField('eventStartDate')
 const [eventEndDate, eventEndDateAttrs] = defineField('eventEndDate')
+const [eventStartTime, eventStartTimeAttrs] = defineField('eventStartTime')
+const [eventEndTime, eventEndTimeAttrs] = defineField('eventEndTime')
 const [eventVenue, eventVenueAttrs] = defineField('eventVenue')
 const [eventColor, eventColorAttrs] = defineField('eventColor')
 
@@ -152,6 +194,8 @@ watch(event, (val) => {
     eventName: val.calendarEvent.title,
     eventStartDate: val.calendarEvent.fromDate,
     eventEndDate: val.calendarEvent.toDate,
+    eventStartTime: val.calendarEvent.fromTime,
+    eventEndTime: val.calendarEvent.toTime,
     eventVenue: val.calendarEvent.venue,
     eventColor: val.calendarEvent.color,
     eventFullDay: val.calendarEvent.isFullDay,
@@ -172,8 +216,8 @@ async function editOnSucess(values, { resetForm }) {
 
   await updateEvent.setValue.submit({
     name1: values.eventName,
-    start_date: values.eventStartDate,
-    end_date: values.eventEndDate,
+    start_date: values.eventStartDate + " " + values.eventStartTime,
+    end_date: values.eventEndDate + " " + values.eventEndTime,
     color: values.eventColor,
     full_day: values.eventFullDay,
   })

@@ -3,16 +3,33 @@ import { createRouter, createWebHistory } from "vue-router"
 import { session } from "./data/session"
 
 const routes = [
-	{
-		path: "/",
-		name: "Home",
-		component: () => import("@/components/Calendar.vue"),
-	},
-	{
-		name: "Login",
-		path: "/account/login",
-		component: () => import("@/pages/Login.vue"),
-	},
+  {
+    path: "/",
+    component: () => import("@/pages/Home.vue"),
+    name: "Home",
+    children: [
+      {
+        path: "",
+        name: "HomeIndex",
+        component: () => import("@/components/Gantt.vue"),
+      },
+      {
+        path: "gantt",
+        name: "Gantt",
+        component: () => import("@/components/Gantt.vue"),
+      },
+      {
+        path: "calendar",
+        name: "Calendar",
+        component: () => import("@/components/Calendar.vue"),
+      },
+    ],
+  },
+  {
+    path: "/account/login",
+    name: "Login",
+    component: () => import("@/pages/Login.vue"),
+  },
 ]
 
 const router = createRouter({
