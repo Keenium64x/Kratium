@@ -142,6 +142,12 @@
             v-bind="eventColorAttrs"
             />
             <ErrorMessage :message="errors.eventColor" class="!my-4" />
+            <Alert
+            title="Form Invalid"
+            description="The Details you have entered are Incorrect"
+            theme="red"
+            v-model="isInvalidForm"
+          />
         </div>
     </template>
     </Dialog>
@@ -156,7 +162,7 @@ import {emitter} from '../event-bus'
 
 const show = defineModel('show')
 const event = defineModel('event')
-
+const isInvalidForm = ref(false)
 
 
 const editFormSchema = yup.object({
@@ -165,13 +171,62 @@ const editFormSchema = yup.object({
   eventColor: yup.string().required().label("Color"),
   eventPerson: yup.string(),
 
-  eventStartDate: yup.date().nullable().typeError('Start Date is required').required('Start Date is required').label("Start Date"),
-  eventEndDate: yup.date().nullable().typeError('End Date is required').required('End Date is required').label("End Date"),
+
+  eventStartDate: yup
+    .date()
+    .nullable()
+    .typeError("Start Date is required")
+    .required("Start Date is required"),
+
+  eventEndDate: yup
+    .date()
+    .nullable()
+    .typeError("End Date is required")
+    .required("End Date is required")
+    .min(yup.ref("eventStartDate"), "End Date cannot be before Start Date"),
+
   eventStartTime: yup.string().required().label("Start Time"),
-  eventEndTime: yup.string().required().label("End Time"),
+  eventEndTime: yup
+    .string()
+    .required()
+    .test(
+      "end-after-start",
+      "End time cannot be before start time",
+      function (endTime) {
+        const {
+          eventStartDate,
+          eventEndDate,
+          eventStartTime,
+        } = this.parent
+
+        if (
+          !eventStartDate ||
+          !eventEndDate ||
+          !eventStartTime ||
+          !endTime
+        ) {
+          return true
+        }
+
+        const startDate = new Date(eventStartDate)
+        const endDate = new Date(eventEndDate)
+
+        const [sh, sm] = eventStartTime.split(":").map(Number)
+        const [eh, em] = endTime.split(":").map(Number)
+
+        const start = new Date(startDate)
+        start.setHours(sh, sm, 0, 0)
+
+        const end = new Date(endDate)
+        end.setHours(eh, em, 0, 0)
+
+        return end.getTime() >= start.getTime()
+      }
+    )
+    .label("End Time"),
 })
 
-const { values, errors, defineField, handleSubmit, setValues } = useForm({
+const { values, meta, errors, defineField, handleSubmit, setValues } = useForm({
   validationSchema: editFormSchema
 });
 
@@ -227,7 +282,28 @@ async function editOnSucess(values, { resetForm }) {
   emitter.emit('event-update')
 }
 
-const onSubmit = handleSubmit(editOnSucess)
+function editOnFail(){
+  isInvalidForm.value = true
+}
 
+const onSubmit = handleSubmit(editOnSucess, editOnFail)
+
+
+watch(errors, ()=>{
+  if (!meta.valid){
+    isInvalidForm.value = false
+  }
+})
+
+
+watch(
+  () => values.eventStartDate,
+  (newVal) => {
+    if (!newVal) return
+    setValues({
+      eventEndDate: newVal,
+    })
+  }
+)
 
 </script>

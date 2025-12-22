@@ -66,6 +66,7 @@ calendarActions.fetch().then(()=>{
 emitter.on('event-update', async () => {
     await calendarActions.fetch()
     events.value = calendarActions.data
+    emitter.emit('actions_updated')
 })
 
 
@@ -91,11 +92,14 @@ async function sendUpdate(event) {
     credentials: 'include', 
   })
 
-  if (!res.ok) {
+  emitter.emit('actions_updated')
+   if (!res.ok) {
     throw new Error(await res.text())
   }
 
   return await res.json()
+
+
 }
 
 
@@ -141,9 +145,11 @@ dailyActions.fetch()
 
 async function onModeChange(mode) {
 if (mode === 'Day' || mode === 'Week') {
+    await dailyActions.fetch()
     events.value = dailyActions.data
 }
   else{
+      await calendarActions.fetch()
       events.value = calendarActions.data
 
 }

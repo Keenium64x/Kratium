@@ -32,27 +32,29 @@
       Daily
     </Button>
   </div>
-<div :style="{ height: ganttHeight + 'px' }" class="mt-0">
-  <div
-    id="gantt"
-    v-show="!ganttLoading"
-    class=" h-full m-10 rounded-xl border mt-2"
-  ></div>
+  <div :style="{ height: ganttHeight + 'px' }" class="mt-0">
+    <div
+      ref="ganttEl"
+      id="gantt"
+      v-show="!ganttLoading"
+      class=" h-full m-10 rounded-xl border mt-2"
+    ></div>
 
-  <div
-    v-if="ganttLoading"
-    class="flex items-center justify-center pointer-events-none"
-  >
-    <LoadingText class="text-5xl scale-150" />
+    <div
+      v-if="ganttLoading"
+      class="flex items-center justify-center pointer-events-none"
+    >
+      <LoadingText class="text-5xl scale-150" />
+    </div>
+    
   </div>
-  
-</div>
   </div>
 </template>
 
 <script setup>
 import { createResource, LoadingText, Button } from 'frappe-ui'
 import { watch, ref, computed, onMounted, } from 'vue'
+import { emitter } from '../event-bus'
 
 const ganttLoading = ref(true)
 
@@ -73,11 +75,11 @@ const setYear = () => {
 watch(view, async () => {
   updateGantt()
 })
-
+const ganttEl = ref(null)
 let gantt = null
-const ganttHeight = 600
+const ganttHeight = 700
 
-onMounted(()=>{
+watch(ganttEl,()=>{
   let final_actions_initial = createResource({
   url: '/api/method/kratium.api.get_final_action_list',
   params:{
@@ -140,6 +142,10 @@ function updateGantt(){
     gantt.change_view_mode(view.value)
 
 })}
+
+emitter.on('actions_updated', (event) => {
+  updateGantt()
+})
 
 </script>
 
