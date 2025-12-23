@@ -41,10 +41,9 @@
     ></div>
 
     <div
-      v-if="ganttLoading"
-      class="flex items-center justify-center pointer-events-none"
+      class="flex items-center justify-center h-full"
     >
-      <LoadingText class="text-5xl scale-150" />
+      <LoadingText v-if="ganttLoading" text="Loading Actions..." class="text-5xl scale-150"/>
     </div>
     
   </div>
@@ -54,7 +53,7 @@
 <script setup>
 import { createResource, LoadingText, Button } from 'frappe-ui'
 import { watch, ref, computed, onMounted, } from 'vue'
-import { emitter } from '../event-bus'
+import { emitter } from '../../event-bus'
 
 const ganttLoading = ref(true)
 
@@ -86,7 +85,6 @@ watch(ganttEl,()=>{
     view_mode: view.value,
     calendar: false
   },
-  cache: "final-actions"
 })
   ganttLoading.value = true
   final_actions_initial.fetch().then(() => {
@@ -108,6 +106,7 @@ watch(ganttEl,()=>{
       readonly: true,
       scroll_to: "today"
     })
+    gantt.scroll_current()
 })
 })
 

@@ -158,7 +158,7 @@ import {ref, watch} from 'vue'
 import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
-import {emitter} from '../event-bus'
+import {emitter} from '../../../event-bus'
 
 const show = defineModel('show')
 const event = defineModel('event')

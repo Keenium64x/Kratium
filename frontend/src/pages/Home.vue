@@ -1,17 +1,29 @@
 <template>
-  <div class="flex h-screen">
+    <div class="flex h-screen" >
     <Sidebar />
-
     <div class="flex-1 flex flex-col overflow-hidden">
       <div class="border-b h-[50px] flex items-center px-4">
-        <button @click="close">reset</button>
+        <Breadcrumbs 
+          :items="breadcrumbItems"
+        >
+        <template #prefix="{ item }">
+          <component
+            :is="item.icon"
+            :size="15"
+            class="mr-1"
+          />
+        </template>    
+      </Breadcrumbs>
+  
 
       </div>
       <div class="flex-1 overflow-auto">
-            <dockview-vue
+            <router-view v-if="!isInComponents"/>
+            <dockview-vue v-if="isInComponents"
             style="width:100%;height:100%"
             :theme="themeLightSpaced"
             watermark-component="watermarkComponent"
+            leftHeaderActionsComponent="AddButton"
             @ready="onReady"
           />
           
@@ -21,21 +33,54 @@
 </template>
 
 <script setup>
-import { Plus } from 'lucide-vue-next';
-import Sidebar from '../components/Sidebar.vue'
+import Sidebar from '../components/Layout/Sidebar.vue'
 import { DockviewVue } from 'dockview-vue'
 import 'dockview-vue/dist/styles/dockview.css'
 import { themeLightSpaced } from 'dockview-vue'
 
-import { setDockviewApi, getDockviewApi } from './dockviewApi'
+import { setDockviewApi, getDockviewApi } from '../dockviewApi'
 
-import WatermarkPanel from './WatermarkPanel.vue'
-import Gantt from '../components/Gantt.vue'
-import Calendar from '../components/Calendar.vue'
+import WatermarkPanel from '../components/Layout/WatermarkPanel.vue'
+import AddButton from '../components/Layout/AddButton.vue'
+
+import Gantt from '../components/TimeSystem/Gantt.vue'
+import Calendar from '../components/TimeSystem/Calendar/Calendar.vue'
+import ToDo from '../components/TimeSystem/ToDo.vue'
 
 import { useRoute, useRouter } from 'vue-router'
-import { watch, ref } from 'vue';
+import { watch, ref, computed } from 'vue';
+import { Breadcrumbs } from 'frappe-ui'
 
+import { House, LayoutPanelTop } from 'lucide-vue-next'
+
+const components = ["Gantt", "Calendar", "ToDo"]
+const route = useRoute()
+const router = useRouter()
+
+const isInComponents = computed(() =>{
+  if (components.includes(route.name) || route.name === "HomeIndex"){
+    return true
+  }
+}
+)
+
+//Breadcrumbs
+const breadcrumbItems = [
+  {
+    label: 'Home',
+    icon: House,
+    onClick: () => {
+      router.push('/')
+    },
+  },
+  {
+    label: 'Workspace',
+    icon: LayoutPanelTop,
+    onClick: () => {
+      router.push('/')
+    },
+  },
+]
 
 
 //Docking
@@ -43,21 +88,23 @@ defineOptions({
   components: {
     'dockview-vue': DockviewVue,
     watermarkComponent: WatermarkPanel,
+    AddButton: AddButton,
     Gantt: Gantt,
-    Calendar: Calendar
+    Calendar: Calendar,
+    ToDo: ToDo
   },
 })
 
-const components = []
 
 const panels = ref([])
+const dockviewReady = ref(false)
 
-const route = useRoute()
 
 function onReady(event) {
   const eventApi = event.api
   setDockviewApi(eventApi)
-  
+  dockviewReady.value = true
+
   const savedLayout = localStorage.getItem('my_layout')
   let restored = false
 
@@ -71,7 +118,7 @@ function onReady(event) {
   }
 
   panels.value = Object.values(eventApi.panels).map(p => p.id)
-      if (!panels.value.includes(route.name)){
+      if (!panels.value.includes(route.name) && !(route.name === "HomeIndex")){
         eventApi.addPanel({id: route.name, component: route.name})
       }
 
@@ -80,6 +127,8 @@ function onReady(event) {
     const layout = eventApi.toJSON()
     localStorage.setItem('my_layout', JSON.stringify(layout))
   })
+
+
 }
 
 
@@ -87,16 +136,20 @@ function onReady(event) {
 watch(
   () => route.name,
   (name) => {
+    if (!isInComponents.value) return
+    if (!dockviewReady.value) return
+
     const api = getDockviewApi()
     panels.value = Object.values(api.panels).map(p => p.id)
 
-    if (!panels.value.includes(name)){
-      api.addPanel({id: name, component: name})
+    if (!panels.value.includes(name) && !(route.name === "HomeIndex")) {
+      api.addPanel({ id: name, component: name })
     }
-  
-  },
-
+  }
 )
+
+
+
 function close() {
   localStorage.clear()
 }

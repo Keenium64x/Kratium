@@ -11,20 +11,25 @@
   "start_date",
   "end_date",
   "estimated_hours",
-  "event",
-  "full_day",
   "color",
   "column_break_ggqb",
   "lft",
   "rgt",
   "is_group",
   "old_parent",
-  "parent_action"
+  "parent_action",
+  "types_section",
+  "todo",
+  "completed",
+  "column_break_gwni",
+  "event",
+  "full_day"
  ],
  "fields": [
   {
    "fieldname": "section_break_g7pn",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Basic"
   },
   {
    "fieldname": "lft",
@@ -110,13 +115,34 @@
    "fieldtype": "Select",
    "label": "Color",
    "options": "amber\nviolet\npink\ncyan\nblue\norange\ngreen"
+  },
+  {
+   "fieldname": "types_section",
+   "fieldtype": "Section Break",
+   "label": "Types"
+  },
+  {
+   "default": "0",
+   "fieldname": "todo",
+   "fieldtype": "Check",
+   "label": "ToDo?"
+  },
+  {
+   "default": "0",
+   "fieldname": "completed",
+   "fieldtype": "Check",
+   "label": "Completed?"
+  },
+  {
+   "fieldname": "column_break_gwni",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-21 12:31:10.252502",
+ "modified": "2025-12-23 12:23:51.912922",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

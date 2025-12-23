@@ -11,17 +11,24 @@ const routes = [
       {
         path: "",
         name: "HomeIndex",
-        component: () => import("@/components/Gantt.vue"),
+         component: {
+        render: () => null,
+      },
       },
       {
         path: "gantt",
         name: "Gantt",
-        component: () => import("@/components/Gantt.vue"),
+        component: () => import("@/components/TimeSystem/Gantt.vue"),
       },
       {
         path: "calendar",
         name: "Calendar",
-        component: () => import("@/components/Calendar.vue"),
+        component: () => import("@/components/TimeSystem/Calendar/Calendar.vue"),
+      },
+      {
+        path: "todo",
+        name: "ToDo",
+        component: () => import("@/components/TimeSystem/ToDo.vue"),
       },
     ],
   },
@@ -33,7 +40,7 @@ const routes = [
 ]
 
 const router = createRouter({
-	history: createWebHistory("/frontend"),
+	history: createWebHistory("/kratium"),
 	routes,
 })
 

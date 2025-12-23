@@ -1,41 +1,42 @@
 <template>
-<div class="flex h-screen flex-col overflow-hidden p-5">
+<div class="relative h-full overflow-hidden p-5">
   <Calendar
-  style="z-index: 0;"
+    v-show="notLoading"
+    class="h-full"
     :config="{
-      defaultMode: 'Month',
+      defaultMode: viewMode,
       isEditMode: true,
-      eventIcons: {
-      },
       allowCustomClickEvents: true,
       enableShortcuts: false,
-      
     }"
     :events="events"
-    @click="(event) => console.log('onClick', event)"
-    @dblClick="(event) => handleDoubleClick(event)"
-    @cellClick="(data) => handleCellClick(data)"
-    @update="(event) => sendUpdate(event)"    
   />
 
-
+  <LoadingText
+    v-if="!notLoading"
+    text="Loading Events..."
+    class="absolute inset-0 flex items-center justify-center text-5xl scale-150"
+  />
   <div>
     <EditEventForm v-model:show="showEditForm" :event="sendEvent"/>
     <NewEventForm v-model:show="showNewForm" :data="sendData"/>
   </div>
-    
 </div>
 </template>
 <script setup>
-import { Calendar, createResource, createDocumentResource } from 'frappe-ui';
+import { Calendar, createResource, createDocumentResource, LoadingText } from 'frappe-ui';
 import {ref, watch, computed, nextTick, reactive } from 'vue'
 import EditEventForm from './EditEventForm.vue';
 import NewEventForm from './NewEventForm.vue';
 
+const viewMode = ref('Month')
+const notLoading = ref(true)
 const showEditForm = ref(false)
 const showNewForm = ref(false)
 let sendEvent = {}
 let sendData = {}
+
+
 
 function handleDoubleClick(event){
   showEditForm.value = true
@@ -106,32 +107,64 @@ async function sendUpdate(event) {
 
 //Listen for viewmode change easier than creating my own header
 import { onMounted, onBeforeUnmount } from 'vue'
-import { emitter } from '../event-bus';
+import { emitter } from '../../../event-bus';
 
 let observer
 
-onMounted(() => {
+function setupCalendarObserver() {
+  observer?.disconnect()
+
   const container = document.querySelector('[role="radiogroup"]')
   if (!container) return
 
   observer = new MutationObserver(() => {
-    const active = container.querySelector('[role="radio"][aria-checked="true"] button')
+    const active = container.querySelector('[aria-checked="true"]')
     if (!active) return
 
-    const value = active.getAttribute('value')
-    onModeChange(value)
+    const mode = active.textContent.trim()
+    onModeChange(mode)
   })
 
   observer.observe(container, {
     subtree: true,
     attributes: true,
-    attributeFilter: ['aria-checked']
+    attributeFilter: ['aria-checked'],
   })
+}
+
+const onEventUpdate = async () => {
+  await calendarActions.fetch()
+  events.value = calendarActions.data
+}
+
+emitter.on('event-update', onEventUpdate)
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  emitter.off('event-update', onEventUpdate)
 })
+
+onMounted(async () => {
+  await nextTick()
+  setupCalendarObserver()
+})
+
+watch(notLoading, async (v) => {
+  if (v) {
+    await nextTick()
+    setupCalendarObserver()
+  }
+})
+//End observer
+
 
 onBeforeUnmount(() => {
   observer?.disconnect()
 })
+
+
+
+
 
 //Load Daily
 let dailyActions = createResource({
@@ -145,13 +178,18 @@ dailyActions.fetch()
 
 async function onModeChange(mode) {
 if (mode === 'Day' || mode === 'Week') {
+    notLoading.value = false
     await dailyActions.fetch()
     events.value = dailyActions.data
+    viewMode.value = mode
+    notLoading.value = true
 }
   else{
+      notLoading.value = false
       await calendarActions.fetch()
       events.value = calendarActions.data
-
+      viewMode.value = mode
+      notLoading.value = true
 }
     
 }

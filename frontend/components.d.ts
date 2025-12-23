@@ -8,15 +8,19 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    Calendar: typeof import('./src/components/Calendar.vue')['default']
-    EditEventForm: typeof import('./src/components/EditEventForm.vue')['default']
-    Gantt: typeof import('./src/components/Gantt.vue')['default']
-    NewEventForm: typeof import('./src/components/NewEventForm.vue')['default']
+    AddButton: typeof import('./src/components/Layout/AddButton.vue')['default']
+    Calendar: typeof import('./src/components/TimeSystem/Calendar/Calendar.vue')['default']
+    EditEventForm: typeof import('./src/components/TimeSystem/Calendar/EditEventForm.vue')['default']
+    Gaantt: typeof import('./src/components/Gaantt.vue')['default']
+    Gantt: typeof import('./src/components/TimeSystem/Gantt.vue')['default']
+    NewEventForm: typeof import('./src/components/TimeSystem/Calendar/NewEventForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    Sidebar: typeof import('./src/components/Sidebar.vue')['default']
+    Sidebar: typeof import('./src/components/Layout/Sidebar.vue')['default']
     Test: typeof import('./src/components/test.vue')['default']
+    ToDo: typeof import('./src/components/TimeSystem/ToDo.vue')['default']
     ValFormControl: typeof import('./src/components/ValFormControl.vue')['default']
     ValidationFormControl: typeof import('./src/components/ValidationFormControl.vue')['default']
+    WatermarkPanel: typeof import('./src/components/Layout/WatermarkPanel.vue')['default']
   }
 }
