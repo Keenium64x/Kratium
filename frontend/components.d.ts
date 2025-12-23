@@ -10,6 +10,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AddButton: typeof import('./src/components/Layout/AddButton.vue')['default']
     Calendar: typeof import('./src/components/TimeSystem/Calendar/Calendar.vue')['default']
+    CreateToDoForm: typeof import('./src/components/TimeSystem/ToDo/CreateToDoForm.vue')['default']
     EditEventForm: typeof import('./src/components/TimeSystem/Calendar/EditEventForm.vue')['default']
     Gaantt: typeof import('./src/components/Gaantt.vue')['default']
     Gantt: typeof import('./src/components/TimeSystem/Gantt.vue')['default']
@@ -18,7 +19,8 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./src/components/Layout/Sidebar.vue')['default']
     Test: typeof import('./src/components/test.vue')['default']
-    ToDo: typeof import('./src/components/TimeSystem/ToDo.vue')['default']
+    ToDo: typeof import('./src/components/TimeSystem/ToDo/ToDo.vue')['default']
+    ToDoContainer: typeof import('./src/components/TimeSystem/ToDo/ToDoContainer.vue')['default']
     ValFormControl: typeof import('./src/components/ValFormControl.vue')['default']
     ValidationFormControl: typeof import('./src/components/ValidationFormControl.vue')['default']
     WatermarkPanel: typeof import('./src/components/Layout/WatermarkPanel.vue')['default']

@@ -23,7 +23,30 @@
   "completed",
   "column_break_gwni",
   "event",
-  "full_day"
+  "full_day",
+  "constraints_and_dependancies_section",
+  "milestone",
+  "milestone_action",
+  "constraints",
+  "data_processing_tab",
+  "pert_section",
+  "optimistic_time",
+  "most_likely_time",
+  "pesimistic_time",
+  "column_break_bhxb",
+  "expected_time",
+  "variance",
+  "standard_deviance",
+  "cpm_section",
+  "forwards_pass_column",
+  "early_start",
+  "early_finish",
+  "leaf",
+  "backwards_pass_column",
+  "late_start",
+  "late_finish",
+  "float",
+  "data_collection_tab"
  ],
  "fields": [
   {
@@ -88,6 +111,7 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Start Date",
+   "mandatory_depends_on": "eval:doc.milestone == 0",
    "reqd": 1
   },
   {
@@ -95,6 +119,7 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "End Date",
+   "mandatory_depends_on": "eval:doc.milestone == 0",
    "reqd": 1
   },
   {
@@ -136,13 +161,133 @@
   {
    "fieldname": "column_break_gwni",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "constraints_and_dependancies_section",
+   "fieldtype": "Section Break",
+   "label": "Constraints and Dependancies"
+  },
+  {
+   "default": "0",
+   "fieldname": "milestone",
+   "fieldtype": "Check",
+   "label": "MileStone?"
+  },
+  {
+   "fieldname": "cpm_section",
+   "fieldtype": "Section Break",
+   "label": "CPM"
+  },
+  {
+   "fieldname": "float",
+   "fieldtype": "Data",
+   "label": "Float"
+  },
+  {
+   "depends_on": "milestone",
+   "fieldname": "milestone_action",
+   "fieldtype": "Link",
+   "label": "MileStone Action",
+   "options": "Action"
+  },
+  {
+   "fieldname": "constraints",
+   "fieldtype": "Table",
+   "label": "Constraints",
+   "options": "Constraint"
+  },
+  {
+   "fieldname": "data_processing_tab",
+   "fieldtype": "Tab Break",
+   "label": "Data Processing"
+  },
+  {
+   "fieldname": "data_collection_tab",
+   "fieldtype": "Tab Break",
+   "label": "Data Collection"
+  },
+  {
+   "fieldname": "forwards_pass_column",
+   "fieldtype": "Column Break",
+   "label": "Forwards Pass"
+  },
+  {
+   "fieldname": "early_start",
+   "fieldtype": "Datetime",
+   "label": "Early Start"
+  },
+  {
+   "fieldname": "early_finish",
+   "fieldtype": "Datetime",
+   "label": "Early Finish"
+  },
+  {
+   "default": "0",
+   "fieldname": "leaf",
+   "fieldtype": "Check",
+   "label": "Leaf?",
+   "read_only": 1
+  },
+  {
+   "fieldname": "backwards_pass_column",
+   "fieldtype": "Column Break",
+   "label": "Backwards Pass"
+  },
+  {
+   "fieldname": "late_start",
+   "fieldtype": "Datetime",
+   "label": "Late Start"
+  },
+  {
+   "fieldname": "late_finish",
+   "fieldtype": "Datetime",
+   "label": "Late Finish"
+  },
+  {
+   "fieldname": "pert_section",
+   "fieldtype": "Section Break",
+   "label": "PERT"
+  },
+  {
+   "fieldname": "optimistic_time",
+   "fieldtype": "Data",
+   "label": "Optimistic Time"
+  },
+  {
+   "fieldname": "most_likely_time",
+   "fieldtype": "Data",
+   "label": "Most Likely Time"
+  },
+  {
+   "fieldname": "pesimistic_time",
+   "fieldtype": "Data",
+   "label": "Pesimistic Time"
+  },
+  {
+   "fieldname": "column_break_bhxb",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "expected_time",
+   "fieldtype": "Data",
+   "label": "Expected Time"
+  },
+  {
+   "fieldname": "variance",
+   "fieldtype": "Data",
+   "label": "Variance"
+  },
+  {
+   "fieldname": "standard_deviance",
+   "fieldtype": "Data",
+   "label": "Standard Deviance"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-23 12:23:51.912922",
+ "modified": "2025-12-23 17:53:11.808634",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

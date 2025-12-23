@@ -60,16 +60,18 @@ const ganttLoading = ref(true)
 let view = ref("Month")
 const setDay = () => {
   view.value = "Day"
+  localStorage.setItem('gantt_view', 'Day')
 }
 const setMonth = () => {
   view.value = "Month"
+  localStorage.setItem('gantt_view', 'Month')
 }
 const setYear = () => {
   view.value = "Year"
+  localStorage.setItem('gantt_view', 'Year')
 }
 
-
-
+view.value = localStorage.getItem('gantt_view') || "Month"
 
 watch(view, async () => {
   updateGantt()
@@ -99,6 +101,7 @@ watch(ganttEl,()=>{
       end: a.end,
       progress: 0,
     }))
+    
 
     gantt = new Gantt('#gantt', tasks, {
       container_height: ganttHeight,
@@ -142,8 +145,13 @@ function updateGantt(){
 
 })}
 
+import {getDockviewApi} from '../../dockviewApi'
+const api = getDockviewApi()
+
 emitter.on('actions_updated', (event) => {
-  updateGantt()
+  if (api.getPanel('Gantt')){
+    updateGantt()
+  }
 })
 
 </script>

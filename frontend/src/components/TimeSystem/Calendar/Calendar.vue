@@ -10,6 +10,11 @@
       enableShortcuts: false,
     }"
     :events="events"
+
+    @update="(event) => sendUpdate(event)"
+    @click="(event) => console.log(event)"
+    @dblClick="(event) => handleDoubleClick(event)"
+    @cellClick="(data) => handleCellClick(data)"
   />
 
   <LoadingText
@@ -65,9 +70,16 @@ calendarActions.fetch().then(()=>{
 })
 //Listen for event update submit
 emitter.on('event-update', async () => {
-    await calendarActions.fetch()
-    events.value = calendarActions.data
-    emitter.emit('actions_updated')
+    if (viewMode.value === 'Month'){
+      await calendarActions.fetch()
+      events.value = calendarActions.data
+      emitter.emit('actions_updated')
+    }
+    else{
+      await dailyActions.fetch()
+      events.value = dailyActions.data
+      emitter.emit('actions_updated')
+    }
 })
 
 
@@ -75,7 +87,7 @@ emitter.on('event-update', async () => {
 // update sync
 async function sendUpdate(event) {
   const url = `/api/v2/document/Action/${event.title}`
-
+  
   const payload = {
     name1: event.title,
     start_date: event.fromDateTime,
@@ -132,16 +144,10 @@ function setupCalendarObserver() {
   })
 }
 
-const onEventUpdate = async () => {
-  await calendarActions.fetch()
-  events.value = calendarActions.data
-}
 
-emitter.on('event-update', onEventUpdate)
 
 onBeforeUnmount(() => {
   observer?.disconnect()
-  emitter.off('event-update', onEventUpdate)
 })
 
 onMounted(async () => {

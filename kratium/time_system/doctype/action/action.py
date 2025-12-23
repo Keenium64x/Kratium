@@ -23,10 +23,31 @@ def hour_diff(dt1, dt2) -> float:
     return round((t2 - t1).total_seconds() / 3600, 0)
 
 class Action(NestedSet):
-    def before_save(self):
-        hours = hour_diff(self.start_date, self.end_date)
-        self.estimated_hours = hours
-        if hours > 24:
-            self.full_day = True
+    def validate(self):
+        self.sync_milestone_dates()
+        self.compute_duration()
+        self.check_leaf()
+
+    def sync_milestone_dates(self):
+        if self.milestone and self.milestone_action:
+            row = frappe.db.get_value(
+                "Action",
+                self.milestone_action,
+                ["start_date", "end_date"],
+                as_dict=True
+            )
+            if row:
+                self.start_date = row.start_date
+                self.end_date = row.end_date
+
+    def compute_duration(self):
+        if self.start_date and self.end_date:
+            hours = hour_diff(self.start_date, self.end_date)
+            self.estimated_hours = hours
+            self.full_day = hours > 24
         else:
-            self.full_day = False
+            self.estimated_hours = 0
+            self.full_day = False    
+    def check_leaf(self):
+        if self.rgt == self.lft + 1:
+            self.leaf = 1

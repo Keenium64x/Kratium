@@ -25,13 +25,13 @@ const routes = [
         name: "Calendar",
         component: () => import("@/components/TimeSystem/Calendar/Calendar.vue"),
       },
-      {
-        path: "todo",
-        name: "ToDo",
-        component: () => import("@/components/TimeSystem/ToDo.vue"),
-      },
     ],
   },
+  {
+    path: "/todo",
+    name: "ToDo",
+    component: () => import("@/components/TimeSystem/ToDo/ToDo.vue"),
+  },  
   {
     path: "/account/login",
     name: "Login",

@@ -1,6 +1,6 @@
 <template>
   <div class="flex justify-center items-center h-full bg-[#f6f5fa]">
-    <div class="border h-1/4 w-1/3 bg-white flex justify-center items-center rounded-2xl">
+    <div class="border h-1/4 w-1/3 bg-white flex flex-col justify-center items-center rounded-2xl">
       <Dropdown :options="options" class="m-2">
         <Button
         class="!m-3"
@@ -8,7 +8,7 @@
         theme="gray"
         size="lg"
         ><FilePlusCorner /></Button>
-        Add Component!
+        Add a new Page to get started
       </Dropdown>
     </div>
   </div>

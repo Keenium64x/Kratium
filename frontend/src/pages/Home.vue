@@ -45,7 +45,7 @@ import AddButton from '../components/Layout/AddButton.vue'
 
 import Gantt from '../components/TimeSystem/Gantt.vue'
 import Calendar from '../components/TimeSystem/Calendar/Calendar.vue'
-import ToDo from '../components/TimeSystem/ToDo.vue'
+import ToDo from '../components/TimeSystem/ToDo/ToDo.vue'
 
 import { useRoute, useRouter } from 'vue-router'
 import { watch, ref, computed } from 'vue';

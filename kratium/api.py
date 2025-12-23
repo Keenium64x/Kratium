@@ -29,14 +29,14 @@ def get_final_action_list(view_mode, calendar):
         return frappe.qb.get_query(
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
-            filters={"parent_action": node["name"]}
+            filters={"parent_action": node["name"], "milestone": 0}
         ).run(as_dict=True)
   
     def get_parent(node):
         return frappe.qb.get_query(
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
-            filters={"name": node["parent_action"]}
+            filters={"name": node["parent_action"], "milestone": 0}
         ).run(as_dict=True)
 
     def get_siblings(node):
@@ -44,7 +44,7 @@ def get_final_action_list(view_mode, calendar):
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
             filters={
-                "parent_action": node["parent_action"],
+                "parent_action": node["parent_action"], 'milestone': 0
             }
         ).run(as_dict=True)
 
@@ -88,17 +88,17 @@ def get_final_action_list(view_mode, calendar):
 
     final_action_name = [action["name"] for action in final_actions]
     condition_actions = frappe.qb.get_query(
-    "Action",
-    fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-    filters={"name": ["in", final_action_name]}
-    ).run(as_dict=True) 
+        "Action",
+        fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+        filters={"name": ["in", final_action_name], "milestone": 0}
+        ).run(as_dict=True) 
 
 
     event_actions = frappe.qb.get_query(
         "Action",
         fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"event": 1}
-    ).run(as_dict=True) 
+        filters={"event": 1, "milestone": 0}
+        ).run(as_dict=True) 
 
 
     final_object = []

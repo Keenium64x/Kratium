@@ -18,6 +18,7 @@ import {
 	resourcesPlugin,
 	setConfig,
 } from "frappe-ui"
+import VueDnDKitPlugin from '@vue-dnd-kit/core';
 
 import "./index.css"
 
@@ -46,5 +47,7 @@ app.config.globalProperties.$socket = socket
 for (const key in globalComponents) {
 	app.component(key, globalComponents[key])
 }
+
+app.use(VueDnDKitPlugin);
 
 app.mount("#app")

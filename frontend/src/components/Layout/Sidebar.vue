@@ -17,7 +17,7 @@ const router = useRouter()
 
 const header = {
   title: 'Kratium',
-  subtitle: "Keenan's' System",
+  subtitle: "Keenan's System",
     logo: '/Kratium Icon.jpg',
   menuItems: [
     {
