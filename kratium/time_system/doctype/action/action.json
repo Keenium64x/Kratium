@@ -1,13 +1,15 @@
 {
  "actions": [],
+ "allow_auto_repeat": 1,
  "allow_rename": 1,
- "autoname": "field:name1",
  "creation": "2025-12-18 10:41:53.675401",
+ "default_view": "List",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "section_break_g7pn",
-  "name1",
+  "action_name",
+  "description",
   "start_date",
   "end_date",
   "estimated_hours",
@@ -88,14 +90,6 @@
    "ignore_user_permissions": 1,
    "label": "Parent Action",
    "options": "Action"
-  },
-  {
-   "fieldname": "name1",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Name",
-   "reqd": 1,
-   "unique": 1
   },
   {
    "fieldname": "estimated_hours",
@@ -281,17 +275,30 @@
    "fieldname": "standard_deviance",
    "fieldtype": "Data",
    "label": "Standard Deviance"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "action_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-23 17:53:11.808634",
+ "modified": "2025-12-24 11:25:33.326792",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",
- "naming_rule": "By fieldname",
  "nsm_parent_field": "parent_action",
  "owner": "Administrator",
  "permissions": [
@@ -306,11 +313,25 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Desk User",
+   "share": 1,
+   "write": 1
   }
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "title_field": "action_name"
 }

@@ -1,6 +1,12 @@
+import re
+import frappe
+from frappe.model.document import Document
+from frappe.model.naming import make_autoname
 from frappe.utils.nestedset import NestedSet
 from datetime import datetime
 import frappe
+
+
 
 DT_FMT  = "%Y-%m-%d %H:%M:%S"
 DT_FMT2 = "%Y-%m-%d %H:%M"
@@ -23,7 +29,15 @@ def hour_diff(dt1, dt2) -> float:
     return round((t2 - t1).total_seconds() / 3600, 0)
 
 class Action(NestedSet):
-    def validate(self):
+    def autoname(self):
+        user = frappe.session.user              
+        local = user.split("@", 1)[0]          
+        safe_local = re.sub(r'[^A-Za-z0-9_-]', '', local)
+
+        self.owner = user
+        self.name = make_autoname(f"{safe_local}-ACT-.######")
+
+    def validate(self):     
         self.sync_milestone_dates()
         self.compute_duration()
         self.check_leaf()
@@ -49,5 +63,11 @@ class Action(NestedSet):
             self.estimated_hours = 0
             self.full_day = False    
     def check_leaf(self):
+        if self.is_new():
+            return
+
+        if self.lft is None or self.rgt is None:
+            return
+
         if self.rgt == self.lft + 1:
             self.leaf = 1

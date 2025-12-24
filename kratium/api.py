@@ -3,6 +3,8 @@ import frappe
 
 @frappe.whitelist()
 def get_final_action_list(view_mode, calendar):
+    owner = frappe.session.user
+    calendar = str(calendar).lower()
 
     view_mode = (view_mode or "").strip('"')
     if view_mode == "Year":
@@ -17,7 +19,7 @@ def get_final_action_list(view_mode, calendar):
     top_actions = frappe.qb.get_query(
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
-            filters={"parent_action": None}
+            filters={"parent_action": None, "owner": owner}
         ).run(as_dict=True)
 
 
@@ -29,14 +31,14 @@ def get_final_action_list(view_mode, calendar):
         return frappe.qb.get_query(
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
-            filters={"parent_action": node["name"], "milestone": 0}
+            filters={"parent_action": node["name"], "milestone": 0, "owner": owner}
         ).run(as_dict=True)
   
     def get_parent(node):
         return frappe.qb.get_query(
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
-            filters={"name": node["parent_action"], "milestone": 0}
+            filters={"name": node["parent_action"], "milestone": 0, "owner": owner}
         ).run(as_dict=True)
 
     def get_siblings(node):
@@ -44,7 +46,7 @@ def get_final_action_list(view_mode, calendar):
             "Action",
             fields=["name", "estimated_hours", "parent_action"],
             filters={
-                "parent_action": node["parent_action"], 'milestone': 0
+                "parent_action": node["parent_action"], 'milestone': 0, "owner": owner
             }
         ).run(as_dict=True)
 
@@ -89,24 +91,25 @@ def get_final_action_list(view_mode, calendar):
     final_action_name = [action["name"] for action in final_actions]
     condition_actions = frappe.qb.get_query(
         "Action",
-        fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"name": ["in", final_action_name], "milestone": 0}
+        fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner}
         ).run(as_dict=True) 
 
 
     event_actions = frappe.qb.get_query(
         "Action",
-        fields=["name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"event": 1, "milestone": 0}
+        fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+        filters={"event": 1, "milestone": 0, "owner": owner}
         ).run(as_dict=True) 
 
 
     final_object = []
-    if calendar == False:
+    if calendar == 'false':
         for action in condition_actions:
             final_object.append(
                 {
                     "id": action["name"],
+                    "name": action["action_name"],
                     "start": action["start_date"],
                     "end": action["end_date"],
                 }
@@ -128,7 +131,7 @@ def get_final_action_list(view_mode, calendar):
             for action in formatted_condition_actions:
                 final_object.append(
                     {
-                        "title": action["name"],
+                        "title": action["action_name"],
                         "id": action["name"],
                         "fromDate": action["fromDate"],
                         "toDate": action["toDate"],
@@ -157,7 +160,7 @@ def get_final_action_list(view_mode, calendar):
                 if action["event"] == True:
                     final_object.append(
                         {
-                            "title": action["name"],
+                            "title": action["action_name"],
                             "id": action["name"],
                             "fromDate": action["fromDate"],
                             "toDate": action["toDate"],

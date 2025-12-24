@@ -18,6 +18,8 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./src/components/Layout/Sidebar.vue')['default']
+    Sortable: typeof import('./src/components/Sortable/Sortable.vue')['default']
+    SortableItem: typeof import('./src/components/Sortable/SortableItem.vue')['default']
     Test: typeof import('./src/components/test.vue')['default']
     ToDo: typeof import('./src/components/TimeSystem/ToDo/ToDo.vue')['default']
     ToDoContainer: typeof import('./src/components/TimeSystem/ToDo/ToDoContainer.vue')['default']

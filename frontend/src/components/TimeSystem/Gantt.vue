@@ -94,9 +94,9 @@ watch(ganttEl,()=>{
     const data = final_actions_initial.data
     if (!data) return
 
-    const tasks = data.map((a, i) => ({
-      id: String(i + 1),
-      name: a.id,
+    const tasks = data.map((a) => ({
+      id: a.id,
+      name: a.name,
       start: a.start,
       end: a.end,
       progress: 0,
@@ -132,9 +132,9 @@ function updateGantt(){
     const data = final_actions_refresh.data
     if (!data || !gantt) return
 
-    const tasks = data.map((a, i) => ({
-      id: String(i + 1),
-      name: a.id,
+    const tasks = data.map((a) => ({
+      id: a.id,
+      name: a.name,
       start: a.start,
       end: a.end,
       progress: 0,
