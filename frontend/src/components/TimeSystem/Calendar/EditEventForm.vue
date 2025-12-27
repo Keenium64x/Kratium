@@ -90,7 +90,7 @@
 
             <p class="block text-xs text-ink-gray-5 !mt-6">End Time</p>
             <TimePicker
-            class="!my-4"
+            class="!my-2"
             v-model="eventEndTime"
             v-bind="eventEndTimeAttrs"
             variant="subtle"

@@ -52,7 +52,7 @@
 
 <script setup>
 import { createResource, LoadingText, Button } from 'frappe-ui'
-import { watch, ref, computed, onMounted, } from 'vue'
+import { watch, ref, computed, onMounted, watchEffect, nextTick } from 'vue'
 import { emitter } from '../../event-bus'
 
 const ganttLoading = ref(true)
@@ -76,42 +76,44 @@ view.value = localStorage.getItem('gantt_view') || "Month"
 watch(view, async () => {
   updateGantt()
 })
-const ganttEl = ref(null)
+
 let gantt = null
 const ganttHeight = 700
 
-watch(ganttEl,()=>{
-  let final_actions_initial = createResource({
-  url: '/api/method/kratium.api.get_final_action_list',
-  params:{
-    view_mode: view.value,
-    calendar: false
-  },
-})
-  ganttLoading.value = true
-  final_actions_initial.fetch().then(() => {
-    ganttLoading.value = false
-    const data = final_actions_initial.data
-    if (!data) return
-
-    const tasks = data.map((a) => ({
-      id: a.id,
-      name: a.name,
-      start: a.start,
-      end: a.end,
-      progress: 0,
-    }))
-    
-
-    gantt = new Gantt('#gantt', tasks, {
-      container_height: ganttHeight,
+watchEffect(async () => {
+    await nextTick()  
+    let final_actions_initial = createResource({
+    url: '/api/method/kratium.api.get_final_action_list',
+    params:{
       view_mode: view.value,
-      readonly: true,
-      scroll_to: "today"
-    })
-    gantt.scroll_current()
+      calendar: false
+    },
+  })
+    ganttLoading.value = true
+    final_actions_initial.fetch().then(() => {
+      ganttLoading.value = false
+      const data = final_actions_initial.data
+      if (!data) return
+
+      const tasks = data.map((a) => ({
+        id: a.id,
+        name: a.name,
+        start: a.start,
+        end: a.end,
+        progress: 0,
+      }))
+      
+
+      gantt = new Gantt('#gantt', tasks, {
+        container_height: ganttHeight,
+        view_mode: view.value,
+        readonly: true,
+        scroll_to: "today"
+      })
+      gantt.scroll_current()
+  })
 })
-})
+
 
 
 

@@ -48,7 +48,7 @@
 
             <p class="block text-xs text-ink-gray-5 !mt-6">Start Time</p>
             <TimePicker
-            class="!my-4"
+            class="!my-2"
             v-model="todoStartTime"
             v-bind="todoStartTimeAttrs"
             variant="subtle"
@@ -64,7 +64,7 @@
 
             <p class="block text-xs text-ink-gray-5 !mt-6">End Time</p>
             <TimePicker
-            class="!my-4"
+            class="!my-2"
             v-model="todoEndTime"
             v-bind="todoEndTimeAttrs"
             variant="subtle"
@@ -77,6 +77,15 @@
             scrollMode="center"
             />            
             <ErrorMessage :message="errors.todoEndTime" class="!my-4" />
+
+            <p class="block text-xs text-ink-gray-5 !mt-6">Reminder At</p>
+            <DateTimePicker
+            v-model="todoReminder"
+            v-bind="todoReminderAttrs"
+            variant="subtle"
+            label="Reminder Date"
+            class="!my-2"
+            />
 
             <FormControl 
             type="number"
@@ -141,7 +150,8 @@
   <template #actions="{ close }">
     <div class="flex justify-start flex-row-reverse gap-2">
       <Button
-        variant="solid"
+        variant="subtle"
+        theme="green"
         @click="onSubmit()"
       >
         Save Changes
@@ -168,7 +178,7 @@
 </template>
 <script setup>
 import {ref, watch} from 'vue'
-import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl } from 'frappe-ui'
+import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl, DateTimePicker } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
 import {emitter} from '../../../event-bus'
@@ -240,7 +250,9 @@ const editFormSchema = yup.object({
     .number()
     .typeError("Duration must be a number")
     .min(1, "Duration must be greater than 0")
-    .required("Duration is required")
+    .required("Duration is required"),
+
+  todoReminder: yup.string().required().label("Reminder At")
 })
 
 const { values, meta, errors, defineField, handleSubmit, setValues } = useForm({
@@ -253,6 +265,7 @@ const [todoEndDate, todoEndDateAttrs] = defineField('todoEndDate')
 const [todoStartTime, todoStartTimeAttrs] = defineField('todoStartTime')
 const [todoEndTime, todoEndTimeAttrs] = defineField('todoEndTime')
 const [todoDuration, todoDurationAttrs] = defineField('todoDuration')
+const [todoReminder, todoReminderAttrs] = defineField('todoReminder')
 const [todoColor, todoColorAttrs] = defineField('todoColor')
 
 
@@ -273,7 +286,8 @@ watch(data, (val) => {
     todoStartTime: startTime,
     todoEndTime: endTime,
     todoColor: val.color,
-    todoDuration: val.estimated_hours
+    todoDuration: val.estimated_hours,
+    todoReminder: val.reminder
   })
 
 

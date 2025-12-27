@@ -37,7 +37,6 @@ class Action(NestedSet):
         self.owner = user
         prefix = f"{safe_local}-ACT-"
 
-        # get highest existing index for this user
         last = frappe.db.sql(
             """
             SELECT name
@@ -75,15 +74,23 @@ class Action(NestedSet):
                 self.end_date = row.end_date
 
     def compute_duration(self):
-        if self.start_date and self.end_date:
-            hours = hour_diff(self.start_date, self.end_date)
-            if not self.todo or hours == None:
+        if getattr(self, "todo", False) and (self.estimated_hours is None):
+            if self.start_date and self.end_date:
+                hours = hour_diff(self.start_date, self.end_date)
                 self.estimated_hours = hours
                 self.full_day = hours > 24
-        else:
-            if not self.todo:
+            else:
                 self.estimated_hours = 0
-                self.full_day = False   
+                self.full_day = False
+        elif not getattr(self, "todo", False):
+            if self.start_date and self.end_date:
+                hours = hour_diff(self.start_date, self.end_date)
+                self.estimated_hours = hours
+                self.full_day = hours > 24
+            else:
+                self.estimated_hours = 0
+                self.full_day = False
+
     def check_leaf(self):
         if self.is_new():
             return

@@ -187,7 +187,6 @@ if (mode === 'Day' || mode === 'Week') {
     notLoading.value = false
     await dailyActions.fetch()
     events.value = dailyActions.data
-    console.log(events.value)
     viewMode.value = mode
     notLoading.value = true
 }
