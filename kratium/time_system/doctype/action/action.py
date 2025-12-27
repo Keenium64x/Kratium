@@ -30,12 +30,32 @@ def hour_diff(dt1, dt2) -> float:
 
 class Action(NestedSet):
     def autoname(self):
-        user = frappe.session.user              
-        local = user.split("@", 1)[0]          
+        user = frappe.session.user
+        local = user.split("@", 1)[0]
         safe_local = re.sub(r'[^A-Za-z0-9_-]', '', local)
 
         self.owner = user
-        self.name = make_autoname(f"{safe_local}-ACT-.######")
+        prefix = f"{safe_local}-ACT-"
+
+        # get highest existing index for this user
+        last = frappe.db.sql(
+            """
+            SELECT name
+            FROM `tabAction`
+            WHERE name LIKE %s
+            ORDER BY name DESC
+            LIMIT 1
+            """,
+            (prefix + "%",),
+            as_dict=True,
+        )
+
+        if not last:
+            idx = 0   
+        else:
+            idx = int(last[0]["name"].split(prefix)[1]) + 1
+
+        self.name = f"{prefix}{idx:06d}"
 
     def validate(self):     
         self.sync_milestone_dates()
@@ -57,11 +77,13 @@ class Action(NestedSet):
     def compute_duration(self):
         if self.start_date and self.end_date:
             hours = hour_diff(self.start_date, self.end_date)
-            self.estimated_hours = hours
-            self.full_day = hours > 24
+            if not self.todo or hours == None:
+                self.estimated_hours = hours
+                self.full_day = hours > 24
         else:
-            self.estimated_hours = 0
-            self.full_day = False    
+            if not self.todo:
+                self.estimated_hours = 0
+                self.full_day = False   
     def check_leaf(self):
         if self.is_new():
             return

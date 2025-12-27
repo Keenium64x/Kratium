@@ -33,6 +33,7 @@ import { Calendar, createResource, createDocumentResource, LoadingText } from 'f
 import {ref, watch, computed, nextTick, reactive } from 'vue'
 import EditEventForm from './EditEventForm.vue';
 import NewEventForm from './NewEventForm.vue';
+import {getDockviewApi} from '../../../dockviewApi'
 
 const viewMode = ref('Month')
 const notLoading = ref(true)
@@ -111,8 +112,6 @@ async function sendUpdate(event) {
   }
 
   return await res.json()
-
-
 }
 
 
@@ -135,6 +134,7 @@ function setupCalendarObserver() {
 
     const mode = active.textContent.trim()
     onModeChange(mode)
+    
   })
 
   observer.observe(container, {
@@ -187,6 +187,7 @@ if (mode === 'Day' || mode === 'Week') {
     notLoading.value = false
     await dailyActions.fetch()
     events.value = dailyActions.data
+    console.log(events.value)
     viewMode.value = mode
     notLoading.value = true
 }
@@ -197,8 +198,15 @@ if (mode === 'Day' || mode === 'Week') {
       viewMode.value = mode
       notLoading.value = true
 }
-    
 }
+
+const api = getDockviewApi()
+
+emitter.on('todos_updated', ()=>{
+  if (api.getPanel('Calendar') && !(viewMode === 'Month')){  
+    onModeChange(viewMode.value)
+  }
+})
 
 </script>
 

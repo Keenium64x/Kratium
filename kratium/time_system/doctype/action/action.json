@@ -23,6 +23,7 @@
   "types_section",
   "todo",
   "completed",
+  "starred",
   "column_break_gwni",
   "event",
   "full_day",
@@ -288,6 +289,12 @@
    "in_list_view": 1,
    "label": "Name",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "starred",
+   "fieldtype": "Check",
+   "label": "Starred?"
   }
  ],
  "grid_page_length": 50,
@@ -295,7 +302,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-24 11:25:33.326792",
+ "modified": "2025-12-26 22:33:14.385331",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

@@ -3,6 +3,7 @@
     <Dialog 
     :options="{
         title: 'Edit Event',
+        description: 'Edit the details of your Events',                
         actions: [
         {
         label: 'Submit',
@@ -260,7 +261,7 @@ watch(event, (val) => {
   if (!updateEvent) {
     updateEvent = createDocumentResource({
       doctype: 'Action',
-      name: val.calendarEvent.title, 
+      name: val.calendarEvent.id, 
     })
   }
 }, { immediate: true })
@@ -270,7 +271,8 @@ async function editOnSucess(values, { resetForm }) {
   if (!updateEvent) return
 
   await updateEvent.setValue.submit({
-    name1: values.eventName,
+    name: event.value.calendarEvent.id,
+    action_name: values.eventName,
     start_date: values.eventStartDate + " " + values.eventStartTime,
     end_date: values.eventEndDate + " " + values.eventEndTime,
     color: values.eventColor,

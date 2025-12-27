@@ -12,6 +12,7 @@ declare module 'vue' {
     Calendar: typeof import('./src/components/TimeSystem/Calendar/Calendar.vue')['default']
     CreateToDoForm: typeof import('./src/components/TimeSystem/ToDo/CreateToDoForm.vue')['default']
     EditEventForm: typeof import('./src/components/TimeSystem/Calendar/EditEventForm.vue')['default']
+    EditToDoForm: typeof import('./src/components/TimeSystem/ToDo/EditToDoForm.vue')['default']
     Gaantt: typeof import('./src/components/Gaantt.vue')['default']
     Gantt: typeof import('./src/components/TimeSystem/Gantt.vue')['default']
     NewEventForm: typeof import('./src/components/TimeSystem/Calendar/NewEventForm.vue')['default']

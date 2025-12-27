@@ -154,6 +154,12 @@ emitter.on('actions_updated', (event) => {
   }
 })
 
+emitter.on('todos_updated', (event) => {
+  if (api.getPanel('Gantt') && view.value === 'Day'){
+    updateGantt()
+  }
+})
+
 </script>
 
 

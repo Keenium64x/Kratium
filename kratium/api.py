@@ -76,15 +76,15 @@ def get_final_action_list(view_mode, calendar):
         if isinstance(node, list):
             for top_node in node:
                 if top_node["parent_action"] is None:
-                    initial_nodes = get_children(top_node)
-                    tree_walk(initial_nodes[0])
+                    children = get_children(top_node)
+                    for child in children:
+                        tree_walk(child)
         else:
             siblings = get_siblings(node)
             if validify_action_level(siblings):
                 for action in siblings:
-                    childrenList = get_children(action)
-                    for children in childrenList:
-                        tree_walk(children)
+                    for child in get_children(action):
+                        tree_walk(child)
 
     tree_walk(top_actions)
 
