@@ -252,7 +252,7 @@ const editFormSchema = yup.object({
     .min(1, "Duration must be greater than 0")
     .required("Duration is required"),
 
-  todoReminder: yup.string().required().label("Reminder At")
+  todoReminder: yup.string().nullable().notRequired().label("Reminder At")
 })
 
 const { values, meta, errors, defineField, handleSubmit, setValues } = useForm({
@@ -310,7 +310,6 @@ async function editOnSucess(values, { resetForm }) {
     estimated_hours: values.todoDuration,
     color: values.todoColor,
   })
-
   resetForm()
   show.value = false
   emitter.emit('todo-update')

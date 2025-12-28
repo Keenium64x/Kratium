@@ -201,76 +201,93 @@ watch(
 
 
 
-function handleClick(actionName) {
-  showEdit.value = true
+const todoData = ref(null)
 
-  const match = todos.data.find(
-    todo => todo.action_name === actionName
-  )
-
-  sendTodo.value = match ? { ...match } : null
-}
-
-const today = new Date()
-
-const startInit = new Date(today)
-startInit.setDate(today.getDate() - 7)
-
-const endInit = new Date(today)
-endInit.setDate(today.getDate() + 7)
-
-const _dateRange = ref([startInit, endInit])
-
-const dateRangeValue = computed({
-  get() {
-    return _dateRange.value
-  },
-  set([start, end]) {
-    if (start && end && start > end) {
-      // auto-fix: swap or clamp
-      _dateRange.value = [end, start]
-    } else {
-      _dateRange.value = [start, end]
-    }
-  }
-})
-
-
-let todos = createListResource({
+const todos = createListResource({
   doctype: 'Action',
-  fields: ['action_name', 'reminder', 'completed', 'name', 'color',  'starred', 'start_date', 'end_date', 'starred', 'estimated_hours'],
-    filters: {
-        todo: 1
-    },  
+  fields: [
+    'action_name',
+    'reminder',
+    'completed',
+    'name',
+    'color',
+    'starred',
+    'start_date',
+    'end_date',
+    'estimated_hours'
+  ],
+  filters: [
+    ['todo', '=', 1]
+  ],
   orderBy: 'creation desc',
 })
 todos.fetch()
 
 watch(
-  () => _dateRange.value,
-  ([start, end]) => {
-    // no range → reset
-    if (!start || !end) {
-      todos.filters = { todo: 1 }
-      todos.fetch()
-      return
-    }
-
-    // overlap condition:
-    // action.start_date <= rangeEnd
-    // AND action.end_date >= rangeStart
-    todos.filters = {
-      todo: 1,
-      start_date: ['<=', end],
-      end_date: ['>=', start],
-    }
-
-    todos.fetch()
-  },
-  { deep: true }
-)
-watch(
   () => todos.data,
+  (val) => {
+    if (val) todoData.value = val
+  },
+  { immediate: true }
+)
+
+
+
+function ymd(d) {
+  return d.toISOString().slice(0, 10)
+}
+
+const today = new Date()
+const startInit = ymd(new Date(today.setDate(today.getDate() - 7)))
+const endInit   = ymd(new Date(today.setDate(today.getDate() + 14)))
+
+const dateRangeValue = ref([startInit, endInit])
+
+
+watch(dateRangeValue, (data) => {
+  if (!data) return
+
+  let [start, end] = data.split(',')
+
+  start = `${start.trim()} 00:00:00`
+  end   = `${end.trim()} 23:59:59`
+
+  const todosRange = createListResource({
+    doctype: 'Action',
+    fields: [
+      'action_name',
+      'reminder',
+      'completed',
+      'name',
+      'color',
+      'starred',
+      'start_date',
+      'end_date',
+      'estimated_hours'
+    ],
+    filters: [
+      ['start_date', '<=', end],
+      ['end_date', '>=', start],
+      ['todo', '=', 1],
+    ],
+    orderBy: 'creation desc',
+  })
+
+  todosRange.fetch()
+
+  watch(
+    () => todosRange.data,
+    (val) => {
+      if (val) todoData.value = val
+    },
+    { immediate: true }
+  )
+})
+
+
+
+watch(
+  () => todoData.value,
   (newTodos) => {
     if (!newTodos) return
     
@@ -280,6 +297,7 @@ watch(
     for (const todo of newTodos) {
       if (todo.completed === 0 || todo.completed === "0") {
         pending.value.push(todo)
+
       } else {
         completed.value.push(todo)
       }
@@ -294,6 +312,19 @@ emitter.on("todos_updated", async ()=>{
 })
 
 
+async function handleClick(actionName) {
+  await todos.fetch()
+  todoData.value = todos.data
+  
+  showEdit.value = true
+
+  const match = todoData.value.find(
+    todo => todo.action_name === actionName
+  )
+  console.log(match)
+  sendTodo.value = match 
+  console.log(sendTodo.value)
+}
 
 const formDisplay = reactive({
   icon: Plus,
@@ -397,25 +428,38 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
   function applyByDate(date, token, fromDate) {
     if (!token) return;
 
-    const t = token.trim().toLowerCase();
+    const t = token.trim();
 
-    if (!isValidDateToken(t)) {
-      errorMessage.value = "Invalid By or From Format. Check your spelling";
-      throw new Error("Invalid BY");
+    // ✅ ABSOLUTE DATE SUPPORT (YYYY/MM/DD, YYYY-MM-DD, etc.)
+    const parsed = new Date(t);
+    if (!isNaN(parsed)) {
+      date.setFullYear(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate()
+      );
+      return;
     }
 
-    if (t === "today") {
+    const lower = t.toLowerCase();
+
+    if (!isValidDateToken(lower)) {
+      errorMessage.value = "Invalid By or From Format. Check your spelling";
+      throw new Error("Invalid By");
+    }
+
+    if (lower === "today") {
       date.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
       return;
     }
 
-    if (t === "tomorrow") {
+    if (lower === "tomorrow") {
       date.setDate(date.getDate() + 1);
       return;
     }
 
-    if (days[t] !== undefined) {
-      const target = days[t];
+    if (days[lower] !== undefined) {
+      const target = days[lower];
       const fromDay = fromDate.getDay();
       let diff = target - date.getDay();
 
@@ -478,8 +522,7 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
       const byDate = new Date(end);
       applyByDate(byDate, byValue, start);
 
-      if (byDate > end) end = byDate;
-      if (byDate < end) end = byDate;
+      end = byDate;
     } catch {
       return null;
     }
@@ -496,7 +539,6 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
     end: fmt(end),
   };
 }
-
 
 
 
@@ -577,19 +619,31 @@ function createTodo(input) {
   }
 
   if (isInvalidDateFormat(result.By)) {
-    errorMessage.value = "Invalid date format for 'By'. Use YYYY/MM/DD.";
+    errorMessage.value = "Invalid date format for By. Use YYYY/MM/DD.";
     return;
   }
 
   if (isInvalidDateFormat(result.From)) {
-    errorMessage.value = "Invalid date format for 'From'. Use YYYY/MM/DD.";
+    errorMessage.value = "Invalid date format for From. Use YYYY/MM/DD.";
     return;
   }
 
-  const hours = parseInt(result.Duration, 10);
+  let hours = 0;
+  const durRegex = /(\d+(?:\.\d+)?)\s*(d|h|m)/gi;
+  let fit;
+
+  while ((fit = durRegex.exec(result.Duration)) !== null) {
+    const value = Number(fit[1]);
+    const unit = fit[2].toLowerCase();
+
+    if (unit === "d") hours += value * 24;
+    if (unit === "h") hours += value;
+    if (unit === "m") hours += value / 60;
+  }
+
 
   let parent = "";
-  for (const task of todos.data) {
+  for (const task of todoData) {
     if (task.action_name === result.Under) {
       parent = task.name;
       break;
@@ -599,8 +653,15 @@ function createTodo(input) {
   if (parent === "") parent = "Administrator-ACT-000001";
 
   const dateRange = getDateRange(result.By, result.At, hours, result.From);
+  
+  if (hours === 0 && dateRange) {
+  const start = new Date(dateRange.start.replace(/-/g, "/"));
+  const end = new Date(dateRange.end.replace(/-/g, "/"));
+  hours = (end - start) / 36e5;
+}
 
   if (!dateRange) return;
+  
 
   // ---------- REMINDER LOGIC (FINAL) ----------
   function formatDateTime(date) {
@@ -637,7 +698,7 @@ function createTodo(input) {
       const [y, mo, d] = reminderInput.split("/").map(Number);
       return formatDateTime(new Date(y, mo - 1, d, 0, 0, 0));
     }
-
+    
     // 3️⃣ duration: 1d 2h 15m
     let totalMs = 0;
     const durRegex = /(\d+)\s*(d|h|m)/gi;
@@ -656,7 +717,7 @@ function createTodo(input) {
   }
 
   const reminder = computeReminder(result.Reminder, dateRange.end);
-
+  
   if (errorMessage.value === "") {
     todos.insert.submit({
       action_name: result.todo,
