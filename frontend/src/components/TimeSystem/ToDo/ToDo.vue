@@ -347,18 +347,42 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
 
     return { h, min };
   }
+
   const days = {
     sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
     thursday: 4, friday: 5, saturday: 6,
   };
 
+  // ---------- VALID DATE TOKENS ----------
+  const validDateTokens = new Set([
+    "today",
+    "tomorrow",
+    ...Object.keys(days),
+  ]);
+
+  function isValidDateToken(token) {
+    if (!token) return true;
+    return validDateTokens.has(token.trim().toLowerCase());
+  }
+
   // ---------- APPLY DATE (FROM) ----------
   function applyFromDate(date, token) {
     if (!token) return;
+
     const t = token.trim().toLowerCase();
+
+    if (!isValidDateToken(t)) {
+      errorMessage.value = "Invalid By or From Format. Check your spelling";
+      throw new Error("Invalid FROM");
+    }
 
     if (t === "today") {
       date.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+      return;
+    }
+
+    if (t === "tomorrow") {
+      date.setDate(date.getDate() + 1);
       return;
     }
 
@@ -369,27 +393,36 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
     }
   }
 
-  // ---------- APPLY DATE (BY — SMART) ----------
+  // ---------- APPLY DATE (BY) ----------
   function applyByDate(date, token, fromDate) {
     if (!token) return;
+
     const t = token.trim().toLowerCase();
+
+    if (!isValidDateToken(t)) {
+      errorMessage.value = "Invalid By or From Format. Check your spelling";
+      throw new Error("Invalid BY");
+    }
 
     if (t === "today") {
       date.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
       return;
     }
 
+    if (t === "tomorrow") {
+      date.setDate(date.getDate() + 1);
+      return;
+    }
+
     if (days[t] !== undefined) {
       const target = days[t];
       const fromDay = fromDate.getDay();
-
       let diff = target - date.getDay();
 
-      // 🔑 decide direction
       if (target >= fromDay) {
-        if (diff < 0) diff += 7;   // forward
+        if (diff < 0) diff += 7;
       } else {
-        if (diff > 0) diff -= 7;   // backward
+        if (diff > 0) diff -= 7;
       }
 
       date.setDate(date.getDate() + diff);
@@ -402,18 +435,20 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
 
   // ---------- FROM ----------
   if (fromValue) {
-    const parts = fromValue.trim().split(/\s+/);
-    applyFromDate(start, parts[0]);
+    try {
+      const parts = fromValue.trim().split(/\s+/);
+      applyFromDate(start, parts[0]);
 
-    const time = parseTime(parts.slice(1).join(""));
-    if (time) start.setHours(time.h, time.min, 0, 0);
+      const time = parseTime(parts.slice(1).join(""));
+      if (time) start.setHours(time.h, time.min, 0, 0);
+    } catch {
+      return null;
+    }
   }
 
   // ---------- AT ----------
   if (atValue) {
-    // normalize "2pm-6pm" → "2pm to 6pm"
     const normalized = atValue.replace(/\s*-\s*/g, " to ");
-
     const parts = normalized.split(/\s+to\s+/i);
 
     if (parts.length === 2) {
@@ -439,11 +474,15 @@ function getDateRange(byValue, atValue, durationValue, fromValue) {
 
   // ---------- BY ----------
   if (byValue) {
-    const byDate = new Date(end);
-    applyByDate(byDate, byValue, start);
+    try {
+      const byDate = new Date(end);
+      applyByDate(byDate, byValue, start);
 
-    if (byDate > end) end = byDate;
-    if (byDate < end) end = byDate;
+      if (byDate > end) end = byDate;
+      if (byDate < end) end = byDate;
+    } catch {
+      return null;
+    }
   }
 
   // ---------- VALIDATION ----------
