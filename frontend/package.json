@@ -16,7 +16,11 @@
   "dependencies": {
     "@vee-validate/yup": "^4.15.1",
     "@vue-dnd-kit/core": "^1.7.0",
+    "@vue-flow/background": "^1.3.2",
+    "@vue-flow/controls": "^1.1.3",
+    "@vue-flow/core": "^1.48.1",
     "@vueuse/core": "^14.1.0",
+    "dagre": "^0.8.5",
     "dockview-vue": "^4.12.0",
     "feather-icons": "^4.29.2",
     "frappe-ui": "^0.1.192",

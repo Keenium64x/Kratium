@@ -33,6 +33,11 @@ const routes = [
     ],
   },
   {
+    path: "/statePlanning",
+    name: "StatePlanning",
+    component: () => import("@/components/PlanningSystem/StatePlanning.vue"),
+  },   
+  {
     path: "/account/login",
     name: "Login",
     component: () => import("@/pages/Login.vue"),

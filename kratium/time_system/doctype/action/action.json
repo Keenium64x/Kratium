@@ -13,14 +13,12 @@
   "start_date",
   "end_date",
   "estimated_hours",
+  "column_break_ggqb",
   "color",
   "reminder",
-  "column_break_ggqb",
-  "lft",
-  "rgt",
-  "is_group",
-  "old_parent",
+  "ancestor",
   "parent_action",
+  "is_group",
   "types_section",
   "todo",
   "completed",
@@ -28,10 +26,34 @@
   "column_break_gwni",
   "event",
   "full_day",
+  "routine",
   "constraints_and_dependancies_section",
   "milestone",
   "milestone_action",
   "constraints",
+  "dependancies",
+  "tree_details_section",
+  "old_parent",
+  "lft",
+  "rgt",
+  "state_planning_tab",
+  "state_planning_section",
+  "basegoal",
+  "goal",
+  "what_is_the_goal",
+  "what_is_the_nature_of_the_goal",
+  "warent_for_what_is_needed",
+  "do_i_have_the_knowledge",
+  "what_is_the_knowledge_i_need",
+  "how_can_i_obtain_the_knowledge_needed",
+  "truth_claims",
+  "what_are_the_states",
+  "what_are_the_bridging_actions",
+  "goal_planning_tab",
+  "goal_planning_section",
+  "what_is_the_base_goal",
+  "what_is_the_nature_of_the_base_goal",
+  "data_collection_tab",
   "data_processing_tab",
   "pert_section",
   "optimistic_time",
@@ -50,7 +72,7 @@
   "late_start",
   "late_finish",
   "float",
-  "data_collection_tab"
+  "oncriticalpath"
  ],
  "fields": [
   {
@@ -281,8 +303,7 @@
   {
    "fieldname": "description",
    "fieldtype": "Small Text",
-   "label": "Description",
-   "read_only": 1
+   "label": "Description"
   },
   {
    "fieldname": "action_name",
@@ -301,6 +322,134 @@
    "fieldname": "reminder",
    "fieldtype": "Datetime",
    "label": "Reminder"
+  },
+  {
+   "fieldname": "state_planning_tab",
+   "fieldtype": "Tab Break",
+   "label": "State Planning"
+  },
+  {
+   "fieldname": "state_planning_section",
+   "fieldtype": "Section Break",
+   "label": "State Planning"
+  },
+  {
+   "depends_on": "eval: doc.goal || doc.basegoal",
+   "fieldname": "what_is_the_goal",
+   "fieldtype": "Small Text",
+   "label": "What is the Goal?"
+  },
+  {
+   "depends_on": "eval: doc.goal || doc.basegoal",
+   "fieldname": "what_is_the_nature_of_the_goal",
+   "fieldtype": "Text Editor",
+   "label": "What is the nature of the Goal?"
+  },
+  {
+   "depends_on": "goal",
+   "fieldname": "warent_for_what_is_needed",
+   "fieldtype": "Text Editor",
+   "label": "Warent for what is needed?"
+  },
+  {
+   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "what_are_the_states",
+   "fieldtype": "Text Editor",
+   "label": "What are the States?"
+  },
+  {
+   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "what_are_the_bridging_actions",
+   "fieldtype": "Text Editor",
+   "label": "What are the Bridging Actions"
+  },
+  {
+   "default": "0",
+   "depends_on": "goal",
+   "fieldname": "do_i_have_the_knowledge",
+   "fieldtype": "Check",
+   "label": "Do I have the Knowledge?"
+  },
+  {
+   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "what_is_the_knowledge_i_need",
+   "fieldtype": "Text Editor",
+   "label": "What is the Knowledge I need?"
+  },
+  {
+   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "how_can_i_obtain_the_knowledge_needed",
+   "fieldtype": "Text Editor",
+   "label": "How can I obtain the Knowledge needed?"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: !doc.basegoal",
+   "fieldname": "goal",
+   "fieldtype": "Check",
+   "label": "Goal?"
+  },
+  {
+   "fieldname": "goal_planning_tab",
+   "fieldtype": "Tab Break",
+   "label": "Action Planning"
+  },
+  {
+   "fieldname": "goal_planning_section",
+   "fieldtype": "Section Break",
+   "label": "Goal Planning"
+  },
+  {
+   "default": "0",
+   "fieldname": "oncriticalpath",
+   "fieldtype": "Check",
+   "label": "OnCriticalPath?"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: !doc.goal",
+   "fieldname": "basegoal",
+   "fieldtype": "Check",
+   "label": "BaseGoal?"
+  },
+  {
+   "fieldname": "what_is_the_base_goal",
+   "fieldtype": "Small Text",
+   "label": "What is the Base Goal?"
+  },
+  {
+   "fieldname": "what_is_the_nature_of_the_base_goal",
+   "fieldtype": "Text Editor",
+   "label": "What is the nature of the Base Goal?"
+  },
+  {
+   "fieldname": "truth_claims",
+   "fieldtype": "Table",
+   "label": "Truth Claims",
+   "options": "Fact"
+  },
+  {
+   "fieldname": "tree_details_section",
+   "fieldtype": "Section Break",
+   "label": "Tree Details"
+  },
+  {
+   "fieldname": "ancestor",
+   "fieldtype": "Link",
+   "label": "Ancestor",
+   "options": "Action"
+  },
+  {
+   "default": "0",
+   "fieldname": "routine",
+   "fieldtype": "Check",
+   "label": "Routine?"
+  },
+  {
+   "fieldname": "dependancies",
+   "fieldtype": "Table",
+   "label": "Dependancies",
+   "options": "Dependancies"
   }
  ],
  "grid_page_length": 50,
@@ -308,7 +457,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-27 21:36:44.203346",
+ "modified": "2025-12-30 15:21:08.107659",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

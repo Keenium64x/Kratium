@@ -57,7 +57,7 @@ def get_final_action_list(view_mode, calendar):
     def validify_action_level(nodes):
         fail_con = False
         for node in nodes:
-            if int(node["estimated_hours"]) < hour_condition:
+            if float(node["estimated_hours"]) < hour_condition:
                 fail_con = True
         if fail_con is True:
             parent_fail = get_parent(nodes[0])
@@ -66,7 +66,7 @@ def get_final_action_list(view_mode, calendar):
             return False
         else:
             for action in nodes:
-                if is_leaf(action) and int(action["estimated_hours"]) > hour_condition and action not in final_actions:
+                if is_leaf(action) and float(action["estimated_hours"]) > hour_condition and action not in final_actions:
                     final_actions.append(action)
             return True
         

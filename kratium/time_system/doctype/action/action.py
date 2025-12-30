@@ -57,9 +57,19 @@ class Action(NestedSet):
         self.name = f"{prefix}{idx:06d}"
 
     def validate(self):     
+        self.validate_goals()    
         self.sync_milestone_dates()
         self.compute_duration()
         self.check_leaf()
+
+    def validate_goals(self):
+        goal = self.goal or 0
+        basegoal = self.basegoal or 0
+
+        if goal > 0 and basegoal > 0:
+            frappe.throw(
+                "Goal and Base Goal cannot both be positive at the same time."
+            )
 
     def sync_milestone_dates(self):
         if self.milestone and self.milestone_action:
