@@ -1,16 +1,16 @@
 <template>
     <div class="h-[100vh]">
-        <VueFlow :nodes="nodes">
+        <VueFlow :nodes="dagreNode.nodes" :edges="dagreNode.edges" :nodes-draggable="false">
           <Background/>
-          <Controls />
         </VueFlow>
     </div>
 </template>
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, watchEffect  } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background';
-import { Controls } from '@vue-flow/controls';
+import { createListResource } from 'frappe-ui'
+
 
 //Dagre
 import dagre from 'dagre';
@@ -62,28 +62,69 @@ function layoutWithDagre(nodes, edges, direction = 'TB') {
 //
 
 
-const nodes = ref([
-  {
-    id: '1',
-    position: { x: 50, y: 50 },
-    data: { label: 'Node 1', },
-  }
-]);
 
-function addNode() {
-  const id = Date.now().toString()
+
+const nodes = ref([]);
+const edges = ref([]);
+
+let goalNode = createListResource({
+  doctype: 'Goal Node',
+  fields: ['name', 'label', 'x', 'y', 'type'],
   
-  nodes.value.push({
-    id,
-    position: { x: 150, y: 50 },
-    data: { label: `Node ${id}`, },
+})
+goalNode.fetch()
+
+
+watch(()=>goalNode.data, (data)=>{
+  data.forEach((value)=>{
+    nodes.value.push({
+      id: value.name,
+      data: { label: value.label },
+      position: { x: value.x, y: value.y}
+    })
   })
-}
+
+  
+})
+
+let goalEdge = createListResource({
+  doctype: 'Goal Edge',
+  fields: ['name', 'source', 'target',],
+  
+})
+goalEdge.fetch()
+
+const dagreNode = ref({ nodes: [], edges: [] })
+
+watchEffect(() => {
+  if (!goalNode.data || !goalEdge.data) return
+
+  nodes.value = goalNode.data.map(v => ({
+    id: v.name,
+    data: { label: v.label },
+    position: { x: v.x, y: v.y },
+    type: v.type
+  }))
+
+  edges.value = goalEdge.data.map(v => ({
+    id: v.name,
+    source: v.source,
+    target: v.target,
+    animated: true
+  }))
+
+  dagreNode.value = layoutWithDagre(nodes.value, edges.value)
+})
+
+
+
+
+
+
 
 
 </script>
 <style>
 @import '@vue-flow/core/dist/style.css';
-
 @import '@vue-flow/core/dist/theme-default.css';
 </style>
