@@ -53,20 +53,34 @@
             </button>
         </template>    
         <template #body-main>
-          <div class="flex flex-col space-y-2 p-2 text-ink-gray-9">
-            <Button
-            :variant="'outline'"
-            size="lg"
-            @click.stop="onAdd"
-            >
-            ▲ State Goal
-            </Button>
-            <Button
-            :variant="'outline'"
-            size="lg"
-            >
-            ■  Base Goal
-            </Button>            
+          <div >
+            <div v-if="!enterNameCon" class="flex flex-col space-y-2 p-2 text-ink-gray-9">
+              <Button
+              :variant="'outline'"
+              size="lg"
+              @click.stop="enterName('custom')"
+              >
+              ▲ State Goal
+              </Button>
+              <Button
+              :variant="'outline'"
+              size="lg"
+              @click.stop="enterName('cusout')"
+              >
+              ■  Base Goal
+              </Button>    
+            </div>  
+            <div v-if="enterNameCon" class="p-4">
+                <FormControl
+                  :type="'text'"
+                  size="lg"
+                  variant="subtle"
+                  placeholder="Finish Studies"
+                  label="Enter Name"
+                  v-model="NameInput"
+                  @keydown.enter.prevent="onAdd()"
+                />
+            </div>      
           </div>
         </template>  
       </Popover>  
@@ -79,12 +93,22 @@ import { ref, watch } from 'vue'
 import { Handle } from '@vue-flow/core'
 import { Plus } from 'lucide-vue-next'
 import { emitter } from '../../event-bus'
-import { createDocumentResource, Button, Popover } from 'frappe-ui'
+import { createDocumentResource, Button, Popover, FormControl } from 'frappe-ui'
 
-const popup = ref(false)
+const popover = ref(true)
+const enterNameCon = ref(false)
+const type = ref('custom')
+const NameInput = ref('')
 
-function toggle() {
-  popup.value = !popup.value
+function enterName(nodeType){
+  enterNameCon.value = true
+  type.value = nodeType
+}
+
+function onAdd() {
+  emitter.emit('goal-add-node', { parentId: props.id, type: type.value, name: NameInput.value })
+  console.log(NameInput.value)
+  enterNameCon.value = false
 }
 
 const props = defineProps({
@@ -101,6 +125,7 @@ watch(
     }
   }
 )
+
 
 
 const nodeLabel = ref(props.data.label)
@@ -134,10 +159,6 @@ function onBlur() {
   })  
   }
   emitter.emit('goal-text-edit-blur')
-}
-
-function onAdd() {
-  emitter.emit('goal-add-node', { parentId: props.id })
 }
 
 function onDelete() {

@@ -47,6 +47,7 @@ import Gantt from '../components/TimeSystem/Gantt.vue'
 import Calendar from '../components/TimeSystem/Calendar/Calendar.vue'
 import ToDo from '../components/TimeSystem/ToDo/ToDo.vue'
 import StatePlanning from '../components/PlanningSystem/StatePlanning.vue'
+import StatePlanningForm from '../components/PlanningSystem/StatePlanningForm.vue'
 
 import { useRoute, useRouter } from 'vue-router'
 import { watch, ref, computed, onMounted } from 'vue';
@@ -54,7 +55,7 @@ import { Breadcrumbs } from 'frappe-ui'
 
 import { House, LayoutPanelTop } from 'lucide-vue-next'
 
-const components = ["Gantt", "Calendar", "ToDo", "StatePlanning"]
+const components = ["Gantt", "Calendar", "ToDo", "StatePlanning", 'StatePlanningForm']
 const route = useRoute()
 const router = useRouter()
 
@@ -93,7 +94,8 @@ defineOptions({
     Gantt: Gantt,
     Calendar: Calendar,
     ToDo: ToDo,
-    StatePlanning: StatePlanning
+    StatePlanning: StatePlanning,
+    StatePlanningForm: StatePlanningForm
   },
 })
 
@@ -120,8 +122,22 @@ function onReady(event) {
   }
 
   panels.value = Object.values(eventApi.panels).map(p => p.id)
-      if (!panels.value.includes(route.name) && !(route.name === "HomeIndex")){
+      if (!panels.value.includes(route.name) && !(route.name === "HomeIndex") && route.name != 'StatePlanningForm'){
         eventApi.addPanel({id: route.name, component: route.name})
+      }
+      if (route.name === 'StatePlanningForm'){
+        console.log('custom load')
+        eventApi.addPanel({
+          id: route.name,
+          component: route.name,
+          params: {
+            mode: 'state-planning',
+          },     
+          position: {
+            referencePanel: StatePlanning,
+            direction: 'left'
+          }                 
+        })
       }
 
 
@@ -140,12 +156,37 @@ watch(
   (name) => {
     if (!isInComponents.value) return
     if (!dockviewReady.value) return
+    if (name === 'HomeIndex') return
 
     const api = getDockviewApi()
     panels.value = Object.values(api.panels).map(p => p.id)
 
-    if (!panels.value.includes(name) && !(route.name === "HomeIndex")) {
-      api.addPanel({ id: name, component: name })
+    // 🔹 custom case
+    if (name === 'StatePlanningForm') {
+      if (!panels.value.includes(name)) {
+        console.log('custom trig')
+        api.addPanel({
+          id: name,
+          component: name,
+          params: {
+            mode: 'state-planning',
+          },
+          position: {
+            referencePanel: StatePlanning,
+            direction: 'left'
+          }          
+        })
+      }
+      return
+    }
+
+    // 🔹 default behavior
+    if (!panels.value.includes(name)) {
+      console.log('default trig')
+      api.addPanel({
+        id: name,
+        component: name,
+      })
     }
   }
 )

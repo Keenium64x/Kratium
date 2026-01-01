@@ -100,7 +100,7 @@ const sections = [
         icon: CalendarCheck,
         onClick: () => {
           router.push('/').then(()=>{
-            router.push('/todo').then(() => {
+            router.push('/StatePlanningForm').then(() => {
               router.push('/')
             })
           })

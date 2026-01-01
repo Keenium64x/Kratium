@@ -8,8 +8,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    '(tmp)StatePlanningForm': typeof import('./src/components/PlanningSystem/(tmp)StatePlanningForm.vue')['default']
     AddButton: typeof import('./src/components/Layout/AddButton.vue')['default']
     Calendar: typeof import('./src/components/TimeSystem/Calendar/Calendar.vue')['default']
+    copy: typeof import('./src/components/TimeSystem/Gantt copy.vue')['default']
     CreateToDoForm: typeof import('./src/components/TimeSystem/ToDo/CreateToDoForm.vue')['default']
     CusinNode: typeof import('./src/components/PlanningSystem/CusinNode.vue')['default']
     CusoutNode: typeof import('./src/components/PlanningSystem/CusoutNode.vue')['default']
@@ -25,7 +27,10 @@ declare module 'vue' {
     Sidebar: typeof import('./src/components/Layout/Sidebar.vue')['default']
     Sortable: typeof import('./src/components/Sortable/Sortable.vue')['default']
     SortableItem: typeof import('./src/components/Sortable/SortableItem.vue')['default']
+    StateGoalForm: typeof import('./src/components/PlanningSystem/StateGoalForm.vue')['default']
+    StatePlaasdnningForm: typeof import('./src/components/PlanningSystem/StatePlaasdnningForm.vue')['default']
     StatePlanning: typeof import('./src/components/PlanningSystem/StatePlanning.vue')['default']
+    StatePlanningForm: typeof import('./src/components/PlanningSystem/StatePlanningForm.vue')['default']
     Test: typeof import('./src/components/test.vue')['default']
     ToDo: typeof import('./src/components/TimeSystem/ToDo/ToDo.vue')['default']
     ToDoContainer: typeof import('./src/components/TimeSystem/ToDo/ToDoContainer.vue')['default']

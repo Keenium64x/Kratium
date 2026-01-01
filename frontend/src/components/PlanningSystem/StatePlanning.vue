@@ -134,7 +134,7 @@ goalNode.list.promise.then(() => {
 
 //Adding action
 emitter.on('goal-add-node', async (data)=>{
-  addAction(data, 'custom')
+  addAction(data, data.type)
 })
 
 async function addAction(data, nodeType){
@@ -154,7 +154,7 @@ async function addAction(data, nodeType){
 
   await goalNode.insert.submit({
     id: newId,
-    label: "Add A Name...",
+    label: data.name,
     parent_goal_node: data.parentId,
     type: nodeType
 
@@ -162,7 +162,7 @@ async function addAction(data, nodeType){
   
   nodes.value.push({
     id: newId,
-    data: {label: "Add A Name..."},
+    data: {label: data.name},
     type: nodeType
   })
 

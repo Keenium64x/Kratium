@@ -34,6 +34,11 @@ const routes = [
         path: "statePlanning",
         name: "StatePlanning",
         component: () => import("@/components/PlanningSystem/StatePlanning.vue"),
+      },        
+      {
+        path: "statePlanningForm",
+        name: "StatePlanningForm",
+        component: () => import("@/components/PlanningSystem/StatePlanningForm.vue"),
       },         
     ],
   },
