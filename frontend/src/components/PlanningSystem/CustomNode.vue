@@ -43,12 +43,33 @@
              w-7 h-7 rounded-full bg-white border border-gray-300
              flex items-center justify-center pointer-events-none"
     >
-      <button
-        class="pointer-events-auto w-full h-full flex items-center justify-center"
-        @click.stop="onAdd"
-      >
-        <Plus class="w-4 h-4 text-gray-600" />
-      </button>
+      <Popover>
+        <template #target="{ togglePopover }">
+          <button
+              class="pointer-events-auto w-full h-full flex items-center justify-center"
+              @click.stop="togglePopover"
+            >
+              <Plus class="w-4 h-4 text-gray-600" />
+            </button>
+        </template>    
+        <template #body-main>
+          <div class="flex flex-col space-y-2 p-2 text-ink-gray-9">
+            <Button
+            :variant="'outline'"
+            size="lg"
+            @click.stop="onAdd"
+            >
+            ▲ State Goal
+            </Button>
+            <Button
+            :variant="'outline'"
+            size="lg"
+            >
+            ■  Base Goal
+            </Button>            
+          </div>
+        </template>  
+      </Popover>  
     </div>
   </div>
 </template>
@@ -58,13 +79,29 @@ import { ref, watch } from 'vue'
 import { Handle } from '@vue-flow/core'
 import { Plus } from 'lucide-vue-next'
 import { emitter } from '../../event-bus'
-import { createDocumentResource, Button } from 'frappe-ui'
+import { createDocumentResource, Button, Popover } from 'frappe-ui'
+
+const popup = ref(false)
+
+function toggle() {
+  popup.value = !popup.value
+}
 
 const props = defineProps({
   id: String,
   data: Object,
   selected: Boolean
 })
+
+watch(
+  () => props.selected,
+  (isSelected) => {
+    if (isSelected && !isEditing.value) {
+      emitter.emit('goal-node-selected', { id: props.id })
+    }
+  }
+)
+
 
 const nodeLabel = ref(props.data.label)
 

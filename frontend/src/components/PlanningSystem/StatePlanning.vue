@@ -10,6 +10,7 @@
         @keydown.delete.prevent="deleteSelected"
 
       >
+      
           <template #node-custom="nodePropsCustom">
             <CustomNode v-bind="nodePropsCustom" />
           </template>
@@ -27,7 +28,7 @@
 import { ref, onMounted, watch, watchEffect, onUnmounted } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background';
-import { createListResource } from 'frappe-ui'
+import { createListResource, Popover } from 'frappe-ui'
 import CustomNode from './CustomNode.vue';
 import CusinNode from './CusinNode.vue'
 import CusoutNode from './CusoutNode.vue'
@@ -118,7 +119,8 @@ goalNode.list.promise.then(() => {
         id: `${value}-${data.name}`,
         source: value,
         target: data.name,
-        animated: true
+        animated: true,
+        selected: false
       })  
       })
 
@@ -132,7 +134,11 @@ goalNode.list.promise.then(() => {
 
 //Adding action
 emitter.on('goal-add-node', async (data)=>{
-  function getMaxNodeIndex(goalNodeData) {
+  addAction(data, 'custom')
+})
+
+async function addAction(data, nodeType){
+    function getMaxNodeIndex(goalNodeData) {
     let max = -1
 
     goalNodeData.forEach(node => {
@@ -150,29 +156,28 @@ emitter.on('goal-add-node', async (data)=>{
     id: newId,
     label: "Add A Name...",
     parent_goal_node: data.parentId,
-    type: 'custom'
+    type: nodeType
 
   })
   
   nodes.value.push({
     id: newId,
     data: {label: "Add A Name..."},
-    type: 'custom'
+    type: nodeType
   })
 
   edges.value.push({
     id: `${data.parentId}-${newId}`,
     source: data.parentId,
     target: newId,
-    animated: 'true'
+    animated: true,
+    selected: false
   })
 
   dagreNode.value = layoutWithDagre(nodes.value, edges.value)    
 
   isNew.value = true
-})
-
-
+}
 
 //Deleting Action
 const deleteable = ref(true)
@@ -221,10 +226,33 @@ function deleteSelected() {
     })
       return 
     }
+    const filteredEdges = vfEdges.value.filter(
+      e => selectedNodeIds.includes(e.source)
+    )
+
 
     selectedNodeIds.forEach((node)=>{
-      goalNode.delete.submit(node)
+      console.log(filteredEdges)
+      filteredEdges.forEach(edge => {
+        const childId = edge.target
+
+        const siblings = vfEdges.value.filter(
+          e => e.target === childId && e.id !== edge.id
+        )
+
+        const compiledSources = siblings.map(e => e.source).join(',')
+
+        console.log(compiledSources)
+        goalNode.setValue.submit({
+          name: edge.target,
+          parent_goal_node: compiledSources,
+        })
+
+      })
     })    
+    selectedNodeIds.forEach(nodeId => {
+      goalNode.delete.submit(nodeId)
+    })
 
     nodes.value = updatedNodes
     edges.value = updatedEdges
@@ -263,9 +291,9 @@ onEdgeClick((event)=>{
   e.id === event.edge.id
     ? { ...e, selected: true }
     : e
-)
-
-
+  )
+  edges.value = dagreNode.value.edges
+  dagreNode.value = layoutWithDagre(nodes.value , edges.value)
 })
 
 onEdgesChange((changes) => {
@@ -276,18 +304,53 @@ onEdgesChange((changes) => {
           ? { ...e, selected: false }
           : e
       )
-      
+    edges.value = dagreNode.value.edges
+    dagreNode.value = layoutWithDagre(nodes.value , edges.value)      
     }
   })
+})
+const nodeSelected = ref(false)
+emitter.on('goal-node-selected', (data)=>{
+  nodeSelected.value = true
 })
 
 function deleteSelectedEdges(e) {
   if (e.key !== 'Delete' && e.key !== 'Backspace') return
+  if (nodeSelected.value) return
+
+
+  const deletedEdges = dagreNode.value.edges.filter(edge => edge.selected)
+
+  const deletedSources = new Set(deletedEdges.map(e => e.target))
+
+
+  const connectedEdges = dagreNode.value.edges.filter(
+    edge => !edge.selected && deletedSources.has(edge.target)
+  )
+  const combinedSources = connectedEdges.map(e => e.source).join(',')
+  console.log("edge deletion trig", combinedSources)
+  if (combinedSources === ''){
+    emitter.emit('toast', {
+      title: "Node Deletion Error ",
+      description: "Deletion would result in nodes without parent edges",
+      theme: "red"
+    })
+    return
+  }
 
   dagreNode.value.edges = dagreNode.value.edges.filter(
     edge => !edge.selected
   )
-  console.log(dagreNode.value.edges)
+  edges.value = dagreNode.value.edges
+
+  dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+
+
+  console.log(combinedSources)
+    goalNode.setValue.submit({
+    name: deletedSources,
+    parent_goal_node: combinedSources
+  })
 }
 
 onMounted(() => {
