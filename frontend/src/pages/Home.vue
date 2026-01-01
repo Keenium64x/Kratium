@@ -46,14 +46,15 @@ import AddButton from '../components/Layout/AddButton.vue'
 import Gantt from '../components/TimeSystem/Gantt.vue'
 import Calendar from '../components/TimeSystem/Calendar/Calendar.vue'
 import ToDo from '../components/TimeSystem/ToDo/ToDo.vue'
+import StatePlanning from '../components/PlanningSystem/StatePlanning.vue'
 
 import { useRoute, useRouter } from 'vue-router'
-import { watch, ref, computed } from 'vue';
+import { watch, ref, computed, onMounted } from 'vue';
 import { Breadcrumbs } from 'frappe-ui'
 
 import { House, LayoutPanelTop } from 'lucide-vue-next'
 
-const components = ["Gantt", "Calendar", "ToDo"]
+const components = ["Gantt", "Calendar", "ToDo", "StatePlanning"]
 const route = useRoute()
 const router = useRouter()
 
@@ -91,7 +92,8 @@ defineOptions({
     AddButton: AddButton,
     Gantt: Gantt,
     Calendar: Calendar,
-    ToDo: ToDo
+    ToDo: ToDo,
+    StatePlanning: StatePlanning
   },
 })
 
@@ -154,4 +156,56 @@ function close() {
   localStorage.clear()
 }
 
+
+
+
+import { useToast } from "vue-toastification";
+import { Alert } from 'frappe-ui'
+import { emitter } from '../event-bus';
+
+
+emitter.on('toast',  (data)=>{
+  const toast = useToast();
+  const id = toast(
+    {
+      component: Alert,
+      props: {
+        title: data.title,
+        description: data.description,
+        theme: data.theme,
+      },
+      listeners: {
+        close: () => toast.dismiss(id),
+      },
+    },
+    {
+      type: "default",
+      toastClassName: "toast-reset",
+      bodyClassName: "p-0",
+      hideProgressBar: true,
+      closeButton: false,
+      closeOnClick: false,
+    }
+  )
+})
+
 </script>
+<style>
+.toast-reset {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.Vue-Toastification__toast--default {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.toast-reset svg.lucide.lucide-x {
+  color: #000 !important;
+}
+.Vue-Toastification__icon {
+  display: none !important;
+}
+</style>

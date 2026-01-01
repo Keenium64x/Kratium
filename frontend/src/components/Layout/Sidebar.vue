@@ -10,7 +10,7 @@
 <script setup>
 import { Sidebar } from 'frappe-ui'
 import { useRouter } from 'vue-router'
-import { FilePlusCorner, ChartGantt, Calendar, ListTodo } from 'lucide-vue-next'
+import { FilePlusCorner, ChartGantt, Calendar, ListTodo, Network, Workflow, CalendarCheck } from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -32,6 +32,7 @@ const header = {
 const sections = [
   {
     label: 'Time System',
+    collapsible: true,  
     items: [
       {
         label: 'Gantt',
@@ -58,6 +59,45 @@ const sections = [
       {
         label: 'ToDo',
         icon: ListTodo,
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/todo').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+    ],
+  },
+  {
+    label: 'Planning System',
+    collapsible: true,    
+    items: [
+      {
+        label: 'State Planning',
+        icon: Network,
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/statePlanning').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+      {
+        label: 'Goal Planning',
+        icon: Workflow,
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/calendar').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+      {
+        label: 'Daily Planning',
+        icon: CalendarCheck,
         onClick: () => {
           router.push('/').then(()=>{
             router.push('/todo').then(() => {

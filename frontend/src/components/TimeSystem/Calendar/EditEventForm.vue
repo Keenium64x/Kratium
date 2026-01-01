@@ -156,7 +156,7 @@
 </template>
 <script setup>
 import {ref, watch} from 'vue'
-import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl } from 'frappe-ui'
+import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl, Alert } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
 import {emitter} from '../../../event-bus'
@@ -282,10 +282,21 @@ async function editOnSucess(values, { resetForm }) {
   resetForm()
   show.value = false
   emitter.emit('event-update')
+  emitter.emit('toast', {
+  title: "Event Updated",
+  description: "",
+  theme: "green"
+})    
 }
 
 function editOnFail(){
   isInvalidForm.value = true
+  
+    emitter.emit('toast', {
+    title: "Form Invalid",
+    description: "",
+    theme: "red"
+  })              
 }
 
 const onSubmit = handleSubmit(editOnSucess, editOnFail)

@@ -139,6 +139,13 @@ app_license = "mit"
 # 		"on_trash": "method"
 # 	}
 # }
+doc_events = {
+    "Action": {
+        "after_insert": "kratium.realtime.action_changed",
+        "on_update": "kratium.realtime.action_changed",
+        "on_trash": "kratium.realtime.action_deleted",
+    }
+}
 
 # Scheduled Tasks
 # ---------------

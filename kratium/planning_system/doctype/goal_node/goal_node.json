@@ -7,9 +7,9 @@
  "field_order": [
   "node_information_section",
   "label",
-  "x",
-  "y",
-  "type"
+  "type",
+  "rgt",
+  "parent_goal_node"
  ],
  "fields": [
   {
@@ -23,29 +23,36 @@
    "label": "Label"
   },
   {
-   "fieldname": "x",
-   "fieldtype": "Data",
-   "label": "x"
-  },
-  {
-   "fieldname": "y",
-   "fieldtype": "Data",
-   "label": "y"
-  },
-  {
+   "default": "custom",
    "fieldname": "type",
    "fieldtype": "Select",
    "label": "Type",
-   "options": "default\ninput\noutput"
+   "options": "custom\ncusin\ncusout"
+  },
+  {
+   "fieldname": "rgt",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Right",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_goal_node",
+   "fieldtype": "Data",
+   "ignore_user_permissions": 1,
+   "label": "Parent Goal Node",
+   "options": "Parent Goal Node"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-12-30 20:52:46.198058",
+ "modified": "2026-01-01 01:49:18.304887",
  "modified_by": "Administrator",
  "module": "Planning System",
  "name": "Goal Node",
+ "nsm_parent_field": "parent_goal_node",
  "owner": "Administrator",
  "permissions": [
   {

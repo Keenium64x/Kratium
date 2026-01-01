@@ -16,12 +16,13 @@
 <script setup>
 import 'dockview-vue/dist/styles/dockview.css'
 import { Button, Dropdown } from 'frappe-ui'
-import { FilePlusCorner, ChartGantt, Calendar, ListTodo } from 'lucide-vue-next'
+import { FilePlusCorner, Plus, ChartGantt, Calendar, ListTodo, Network, Workflow, CalendarCheck } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-const options = [{
+const options = [
+  {
     group: 'Time System',
     items: [
       {
@@ -57,8 +58,47 @@ const options = [{
           })
           }
       },
-        ]     
-    } 
+        ],             
+    },
+  {
+    group: 'Planning System',
+    items: [
+      {
+        label: 'State Planning',
+        icon: Network, 
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/statePlanning').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+      {
+        label: 'Goal Planning',
+        icon: Workflow, 
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/calendar').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+      {
+        label: 'Day Planning',
+        icon: CalendarCheck, 
+        onClick: () => {
+          router.push('/').then(()=>{
+            router.push('/todo').then(() => {
+              router.push('/')
+            })
+          })
+          }
+      },
+        ],             
+    },    
+
 ]
 
 

@@ -62,6 +62,7 @@ class Action(NestedSet):
         self.compute_duration()
         self.check_leaf()
 
+
     def validate_goals(self):
         goal = self.goal or 0
         basegoal = self.basegoal or 0

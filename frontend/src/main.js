@@ -22,6 +22,14 @@ import VueDnDKitPlugin from '@vue-dnd-kit/core';
 
 import "./index.css"
 
+import Toast, {POSITION} from "vue-toastification";
+import "vue-toastification/dist/index.css";
+
+const options = {
+	timeout: 5000,
+	position: POSITION.BOTTOM_RIGHT
+};
+
 const globalComponents = {
 	Button,
 	TextInput,
@@ -40,6 +48,7 @@ setConfig("resourceFetcher", frappeRequest)
 app.use(router)
 app.use(resourcesPlugin)
 app.use(pageMetaPlugin)
+app.use(Toast, options);
 
 const socket = initSocket()
 app.config.globalProperties.$socket = socket

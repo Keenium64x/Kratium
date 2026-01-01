@@ -313,10 +313,21 @@ async function editOnSucess(values, { resetForm }) {
   resetForm()
   show.value = false
   emitter.emit('todo-update')
+
+  emitter.emit('toast', {
+  title: "Todo Updated",
+  description: "",
+  theme: "green"
+})      
 }
 
 function editOnFail(){
   isInvalidForm.value = true
+  emitter.emit('toast', {
+  title: "Form Invalid",
+  description: "",
+  theme: "red"
+})        
 }
 
 const onSubmit = handleSubmit(editOnSucess, editOnFail)
@@ -327,6 +338,11 @@ async function onDelete(){
   updatetodo.delete.submit(data.name)
   show.value = false
   emitter.emit('todo-update')
+  emitter.emit('toast', {
+  title: "Todo Deleted",
+  description: "",
+  theme: "green"
+})        
 }
 
 watch(errors, ()=>{
@@ -345,5 +361,7 @@ watch(
     })
   }
 )
+
+
 
 </script>

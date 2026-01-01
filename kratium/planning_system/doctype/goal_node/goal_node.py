@@ -25,5 +25,7 @@ class GoalNode(Document):
         )
 
         idx = int(last[0]["name"].split(prefix)[1]) + 1 if last else 0
-
         self.name = f"{prefix}{idx:06d}"
+
+    def validate(self):
+        pass

@@ -39,10 +39,12 @@ const viewMode = ref('Month')
 const notLoading = ref(true)
 const showEditForm = ref(false)
 const showNewForm = ref(false)
+
+viewMode.value = localStorage.getItem('calendar_view')
+
+
 let sendEvent = {}
 let sendData = {}
-
-
 
 function handleDoubleClick(event){
   showEditForm.value = true
@@ -58,6 +60,7 @@ function handleCellClick(data){
 //Load Events
 const events = ref([])
 
+//Load Month
 const calendarActions = createResource({
   url: '/api/method/kratium.api.get_final_action_list',
   params: {
@@ -66,36 +69,57 @@ const calendarActions = createResource({
   },
 })
 
-calendarActions.fetch().then(()=>{
-  events.value = calendarActions.data
-})
-//Listen for event update submit
-emitter.on('event-update', async () => {
-    if (viewMode.value === 'Month'){
-      await calendarActions.fetch()
-      events.value = calendarActions.data
-      emitter.emit('actions_updated')
-    }
-    else{
-      await dailyActions.fetch()
-      events.value = dailyActions.data
-      emitter.emit('actions_updated')
-    }
+//Load Daily
+let dailyActions = createResource({
+url: '/api/method/kratium.api.get_final_action_list',
+params:{
+  view_mode: "Day",
+  calendar: true
+},
 })
 
-
+async function setEvents(){
+  if (viewMode.value === "Month"){
+    notLoading.value = false
+    await calendarActions.fetch()
+    events.value = calendarActions.data
+    notLoading.value = true
+  }
+  else{
+    notLoading.value = false
+    await dailyActions.fetch()
+    events.value = dailyActions.data
+    notLoading.value = true
+  }
+  //Listen for event update submit
+  emitter.on('event-update', async () => {
+      if (viewMode.value === 'Month'){
+        await calendarActions.fetch()
+        events.value = calendarActions.data
+        emitter.emit('actions_updated')
+      }
+      else{
+        await dailyActions.fetch()
+        events.value = dailyActions.data
+        emitter.emit('actions_updated')
+      }
+  })
+}
+setEvents()
 
 // update sync
 async function sendUpdate(event) {
-  const url = `/api/v2/document/Action/${event.title}`
-  
+  const url = `/api/v2/document/Action/${event.id}`
+  console.log(event)
   const payload = {
-    name1: event.title,
+    id: event.id,
+    action_name: event.title,
     start_date: event.fromDateTime,
     end_date: event.toDateTime,
     color: event.color,
     full_day: event.isFullDay,
   }
+  
 
   const res = await fetch(url, {
     method: 'PUT', 
@@ -105,13 +129,7 @@ async function sendUpdate(event) {
     body: JSON.stringify(payload),
     credentials: 'include', 
   })
-
   emitter.emit('actions_updated')
-   if (!res.ok) {
-    throw new Error(await res.text())
-  }
-
-  return await res.json()
 }
 
 
@@ -172,31 +190,24 @@ onBeforeUnmount(() => {
 
 
 
-//Load Daily
-let dailyActions = createResource({
-url: '/api/method/kratium.api.get_final_action_list',
-params:{
-  view_mode: "Day",
-  calendar: true
-},
-})
-dailyActions.fetch()
+
 
 async function onModeChange(mode) {
-if (mode === 'Day' || mode === 'Week') {
-    notLoading.value = false
-    await dailyActions.fetch()
-    events.value = dailyActions.data
-    viewMode.value = mode
-    notLoading.value = true
-}
-  else{
+  localStorage.setItem('calendar_view', mode)
+  if (mode === 'Day' || mode === 'Week') {
       notLoading.value = false
-      await calendarActions.fetch()
-      events.value = calendarActions.data
+      await dailyActions.fetch()
+      events.value = dailyActions.data
       viewMode.value = mode
       notLoading.value = true
-}
+  }
+    else{
+        notLoading.value = false
+        await calendarActions.fetch()
+        events.value = calendarActions.data
+        viewMode.value = mode
+        notLoading.value = true
+  }
 }
 
 const api = getDockviewApi()

@@ -30,13 +30,13 @@ const routes = [
         name: "ToDo",
         component: () => import("@/components/TimeSystem/ToDo/ToDo.vue"),
       },    
+      {
+        path: "statePlanning",
+        name: "StatePlanning",
+        component: () => import("@/components/PlanningSystem/StatePlanning.vue"),
+      },         
     ],
   },
-  {
-    path: "/statePlanning",
-    name: "StatePlanning",
-    component: () => import("@/components/PlanningSystem/StatePlanning.vue"),
-  },   
   {
     path: "/account/login",
     name: "Login",

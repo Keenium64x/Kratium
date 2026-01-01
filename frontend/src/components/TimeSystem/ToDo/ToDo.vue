@@ -230,8 +230,24 @@ watch(
   },
   { immediate: true }
 )
+import {getDockviewApi} from '../../../dockviewApi'
+const api = getDockviewApi()
+emitter.on('todos_updated', (event) => {
+  if (api.getPanel('ToDo')){
+    todos.fetch()
+  }
+})
 
-
+emitter.on('actions_updated', (event) => {
+  if (api.getPanel('ToDo')){
+    todos.fetch()
+  }
+})
+emitter.on('event-updated', (event) => {
+  if (api.getPanel('ToDo')){
+    todos.fetch()
+  }
+})
 
 function ymd(d) {
   return d.toISOString().slice(0, 10)
@@ -321,9 +337,7 @@ async function handleClick(actionName) {
   const match = todoData.value.find(
     todo => todo.action_name === actionName
   )
-  console.log(match)
   sendTodo.value = match 
-  console.log(sendTodo.value)
 }
 
 const formDisplay = reactive({
@@ -643,7 +657,7 @@ function createTodo(input) {
 
 
   let parent = "";
-  for (const task of todoData) {
+  for (const task of todoData.value) {
     if (task.action_name === result.Under) {
       parent = task.name;
       break;
@@ -731,6 +745,12 @@ function createTodo(input) {
     });
 
     toDoValue.value = "";
+    emitter.emit('todo-update')
+    emitter.emit('toast', {
+    title: "Todo Created",
+    description: "",
+    theme: "green"
+  })    
   }
 }
 
@@ -738,6 +758,7 @@ function createTodo(input) {
 watch(toDoValue, () => {
   errorMessage.value = "";
 });
+
 
 
 
