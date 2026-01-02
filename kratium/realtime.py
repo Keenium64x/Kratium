@@ -1,6 +1,6 @@
 import frappe
 
-def action_changed(doc):
+def action_changed(doc, method):
     frappe.publish_realtime(
         event="action_changed",
         message={
@@ -9,15 +9,14 @@ def action_changed(doc):
             "data": doc.as_dict(),
             "method": method,
         },
-        broadcast=True
     )
 
-def action_deleted(doc):
+def action_deleted(doc, method):
     frappe.publish_realtime(
         event="action_deleted",
         message={
             "name": doc.name,
             "doctype": doc.doctype,
+            "method": method,
         },
-        broadcast=True
     )

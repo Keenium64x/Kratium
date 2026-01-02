@@ -58,6 +58,7 @@ import { House, LayoutPanelTop } from 'lucide-vue-next'
 const components = ["Gantt", "Calendar", "ToDo", "StatePlanning", 'StatePlanningForm']
 const route = useRoute()
 const router = useRouter()
+const goalData = ref(null)
 
 const isInComponents = computed(() =>{
   if (components.includes(route.name) || route.name === "HomeIndex"){
@@ -65,6 +66,14 @@ const isInComponents = computed(() =>{
   }
 }
 )
+
+emitter.on('goal-open-node', (data) => {
+  goalData.value = data.id
+  router.push('/StatePlanningForm').then(()=>{
+  router.push('/')      
+  })
+
+})
 
 //Breadcrumbs
 const breadcrumbItems = [
@@ -131,7 +140,7 @@ function onReady(event) {
           id: route.name,
           component: route.name,
           params: {
-            mode: 'state-planning',
+            id: goalData.value,
           },     
           position: {
             referencePanel: StatePlanning,
@@ -169,7 +178,7 @@ watch(
           id: name,
           component: name,
           params: {
-            mode: 'state-planning',
+            id: goalData.value,
           },
           position: {
             referencePanel: StatePlanning,

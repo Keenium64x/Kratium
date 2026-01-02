@@ -38,17 +38,18 @@
   "rgt",
   "state_planning_tab",
   "state_planning_section",
+  "type",
   "basegoal",
   "goal",
-  "what_is_the_goal",
-  "what_is_the_nature_of_the_goal",
-  "warent_for_what_is_needed",
-  "do_i_have_the_knowledge",
-  "what_is_the_knowledge_i_need",
-  "how_can_i_obtain_the_knowledge_needed",
+  "witg",
+  "witnotg",
+  "wfwis",
+  "dihtk",
+  "witkin",
+  "hciotkn",
   "truth_claims",
-  "what_are_the_states",
-  "what_are_the_bridging_actions",
+  "wats",
+  "watba",
   "goal_planning_tab",
   "goal_planning_section",
   "what_is_the_base_goal",
@@ -129,7 +130,7 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Start Date",
-   "mandatory_depends_on": "eval:doc.milestone == 0",
+   "mandatory_depends_on": "eval:doc.milestone == 0 && doc.type === 'BaseAction'",
    "reqd": 1
   },
   {
@@ -137,7 +138,7 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "End Date",
-   "mandatory_depends_on": "eval:doc.milestone == 0",
+   "mandatory_depends_on": "eval:doc.milestone == 0 && doc.type === 'BaseAction'",
    "reqd": 1
   },
   {
@@ -334,55 +335,6 @@
    "label": "State Planning"
   },
   {
-   "depends_on": "eval: doc.goal || doc.basegoal",
-   "fieldname": "what_is_the_goal",
-   "fieldtype": "Small Text",
-   "label": "What is the Goal?"
-  },
-  {
-   "depends_on": "eval: doc.goal || doc.basegoal",
-   "fieldname": "what_is_the_nature_of_the_goal",
-   "fieldtype": "Text Editor",
-   "label": "What is the nature of the Goal?"
-  },
-  {
-   "depends_on": "goal",
-   "fieldname": "warent_for_what_is_needed",
-   "fieldtype": "Text Editor",
-   "label": "Warent for what is needed?"
-  },
-  {
-   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
-   "fieldname": "what_are_the_states",
-   "fieldtype": "Text Editor",
-   "label": "What are the States?"
-  },
-  {
-   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
-   "fieldname": "what_are_the_bridging_actions",
-   "fieldtype": "Text Editor",
-   "label": "What are the Bridging Actions"
-  },
-  {
-   "default": "0",
-   "depends_on": "goal",
-   "fieldname": "do_i_have_the_knowledge",
-   "fieldtype": "Check",
-   "label": "Do I have the Knowledge?"
-  },
-  {
-   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
-   "fieldname": "what_is_the_knowledge_i_need",
-   "fieldtype": "Text Editor",
-   "label": "What is the Knowledge I need?"
-  },
-  {
-   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
-   "fieldname": "how_can_i_obtain_the_knowledge_needed",
-   "fieldtype": "Text Editor",
-   "label": "How can I obtain the Knowledge needed?"
-  },
-  {
    "default": "0",
    "depends_on": "eval: !doc.basegoal",
    "fieldname": "goal",
@@ -450,6 +402,62 @@
    "fieldtype": "Table",
    "label": "Dependancies",
    "options": "Dependancies"
+  },
+  {
+   "depends_on": "eval: doc.goal || doc.basegoal",
+   "fieldname": "witg",
+   "fieldtype": "Small Text",
+   "label": "What is the Goal?"
+  },
+  {
+   "depends_on": "eval: doc.goal || doc.basegoal",
+   "fieldname": "witnotg",
+   "fieldtype": "Text Editor",
+   "label": "What is the nature of the Goal?"
+  },
+  {
+   "depends_on": "goal",
+   "fieldname": "wfwis",
+   "fieldtype": "Text Editor",
+   "label": "Warent for what is needed?"
+  },
+  {
+   "default": "0",
+   "depends_on": "goal",
+   "fieldname": "dihtk",
+   "fieldtype": "Check",
+   "label": "Do I have the Knowledge?"
+  },
+  {
+   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "witkin",
+   "fieldtype": "Text Editor",
+   "label": "What is the Knowledge I need?"
+  },
+  {
+   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "hciotkn",
+   "fieldtype": "Text Editor",
+   "label": "How can I obtain the Knowledge needed?"
+  },
+  {
+   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "wats",
+   "fieldtype": "Text Editor",
+   "label": "What are the States?"
+  },
+  {
+   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
+   "fieldname": "watba",
+   "fieldtype": "Text Editor",
+   "label": "What are the Bridging Actions"
+  },
+  {
+   "default": "BaseAction",
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "custom\ncusin\ncusout\nBaseAction"
   }
  ],
  "grid_page_length": 50,
@@ -457,7 +465,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2025-12-30 15:21:08.107659",
+ "modified": "2026-01-02 14:01:04.218496",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

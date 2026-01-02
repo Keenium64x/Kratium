@@ -92,8 +92,8 @@ const edges = ref([]);
 const isNew = ref(false)
 
 let goalNode = createListResource({
-  doctype: 'Goal Node',
-  fields: ['name', 'label', 'type', 'parent_goal_node'],
+  doctype: 'Action',
+  fields: ['name', 'action_name', 'type', 'parent_action'],
   
 })
 goalNode.fetch()
@@ -106,14 +106,15 @@ goalNode.list.promise.then(() => {
   }
 
   goalNode.data.forEach((data) => {
+    if (data.type === 'BaseAction') return    
     nodes.value.push({
       id: data.name,
-      data: { label: data.label },
+      data: { label: data.action_name },
       type: data.type
     })
 
-    if (data.parent_goal_node != null) {
-      const parents = data.parent_goal_node.split(',')
+    if (data.parent_action != null) {
+      const parents = data.parent_action.split(',')
       parents.forEach((value)=>{
         edges.value.push({
         id: `${value}-${data.name}`,
@@ -150,13 +151,21 @@ async function addAction(data, nodeType){
   }
 
   const max = getMaxNodeIndex(goalNode.data)
-  const newId = `Administrator-GN-${String(max + 1).padStart(6, '0')}`
-
+  const newId = `Administrator-ACT-${String(max + 1).padStart(6, '0')}`
+  function currentDateMidnight() {
+    const d = new Date()
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day} 00:00`
+}
   await goalNode.insert.submit({
-    id: newId,
-    label: data.name,
-    parent_goal_node: data.parentId,
-    type: nodeType
+    name: newId,
+    action_name: data.name,
+    parent_action: data.parentId,
+    type: nodeType,
+    start_date: currentDateMidnight(),
+    end_date: currentDateMidnight()
 
   })
   
@@ -245,7 +254,7 @@ function deleteSelected() {
         console.log(compiledSources)
         goalNode.setValue.submit({
           name: edge.target,
-          parent_goal_node: compiledSources,
+          parent_action: compiledSources,
         })
 
       })
@@ -269,7 +278,7 @@ const {
 } = useVueFlow()
 
 onConnect((event) => {
-  const previous = goalNode.data.filter(goal => goal.name === event.target)[0].parent_goal_node
+  const previous = goalNode.data.filter(goal => goal.name === event.target)[0].parent_action
 
   edges.value.push({
     id: `${event.source}-${event.targe}`,
@@ -282,7 +291,7 @@ onConnect((event) => {
 
   goalNode.setValue.submit({
     name: event.target,
-    parent_goal_node: `${previous},${event.source}`
+    parent_action: `${previous},${event.source}`
   })
 })
 
@@ -349,7 +358,7 @@ function deleteSelectedEdges(e) {
   console.log(combinedSources)
     goalNode.setValue.submit({
     name: deletedSources,
-    parent_goal_node: combinedSources
+    parent_action: combinedSources
   })
 }
 

@@ -3,6 +3,7 @@
     tabindex="0"
     @keydown.delete.self.prevent="onDelete"
     @keydown.backspace.self.prevent="onDelete"
+    @dblclick="onDbclick"
     :class="[
       'relative bg-white border rounded-md px-6 py-4 min-w-[172px] text-sm transition outline-none',
       selected && isEditing
@@ -20,6 +21,7 @@
 
     <input
       v-model="nodeLabel"
+      :label="id"
       :placeholder="data.label"
       class="w-full text-center p-0 bg-transparent border-0 outline-none ring-0
              focus:outline-none focus:ring-0 focus:border-0
@@ -107,7 +109,6 @@ function enterName(nodeType){
 
 function onAdd() {
   emitter.emit('goal-add-node', { parentId: props.id, type: type.value, name: NameInput.value })
-  console.log(NameInput.value)
   enterNameCon.value = false
 }
 
@@ -131,7 +132,7 @@ watch(
 const nodeLabel = ref(props.data.label)
 
 let goalNode = createDocumentResource({
-  doctype: 'Goal Node',
+  doctype: 'Action',
   name: props.id,
 })
 
@@ -164,4 +165,16 @@ function onBlur() {
 function onDelete() {
   emitter.emit('goal-delete-node', { parentId: props.id })
 }
+
+function onDbclick(event) {
+  const el = event.target instanceof HTMLInputElement
+    ? event.target
+    : event.currentTarget.querySelector('input')
+
+  const label = el?.getAttribute('label')
+  emitter.emit('goal-open-node', { id: label })
+}
+
+
+
 </script>
