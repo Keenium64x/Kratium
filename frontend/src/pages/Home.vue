@@ -138,13 +138,13 @@ function onReady(event) {
         console.log('custom load')
         eventApi.addPanel({
           id: route.name,
-          component: route.name,
+          component: route.name,       
           params: {
             id: goalData.value,
           },     
           position: {
-            referencePanel: StatePlanning,
-            direction: 'left'
+            referencePanel: 'StatePlanning',
+            direction: 'right'
           }                 
         })
       }
@@ -176,13 +176,13 @@ watch(
         console.log('custom trig')
         api.addPanel({
           id: name,
-          component: name,
+          component: name,     
           params: {
             id: goalData.value,
           },
           position: {
-            referencePanel: StatePlanning,
-            direction: 'left'
+            referencePanel: 'StatePlanning',
+            direction: 'right'
           }          
         })
       }

@@ -3,11 +3,12 @@
     tabindex="0"
     @keydown.delete.prevent="onDelete"
     :class="[
-      'relative bg-white border rounded-md px-6 py-4 min-w-[172px] text-sm transition outline-none',
+      'relative border rounded-md px-6 py-4 min-w-[172px] text-sm transition outline-none bg-white',
+      'shadow-[0_6px_16px_rgba(0,0,0,0.12),inset_0_0_0_1px_rgba(0,0,0,0.12)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.16),inset_0_0_0_1px_rgba(0,0,0,0.14)]',
       selected && isEditing
-        ? 'border-black'
+        ? 'border-black shadow-[0_10px_24px_rgba(0,0,0,0.22),inset_0_0_0_1px_rgba(0,0,0,0.25)]'
         : selected
-          ? 'border-black shadow-lg ring-2 ring-black/30'
+          ? 'border-black ring-2 ring-black/30 shadow-[0_8px_20px_rgba(0,0,0,0.18),inset_0_0_0_1px_rgba(0,0,0,0.18)]'
           : 'border-gray-300'
     ]"
   >

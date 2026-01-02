@@ -7,21 +7,21 @@
         :apply-default="false"
         selection-on-drag
         multi-selection-key-code="Shift"
-        @keydown.delete.prevent="deleteSelected"
-
-      >
-      
-          <template #node-custom="nodePropsCustom">
-            <CustomNode v-bind="nodePropsCustom" />
-          </template>
-          <template #node-cusin="nodePropsCusin">
-            <CusinNode v-bind="nodePropsCusin" />
-          </template>    
-          <template #node-cusout="nodePropsCusout">
-            <CusoutNode v-bind="nodePropsCusout" />
-          </template>                   
-          <Background/>
-        </VueFlow>
+        @keydown.delete.prevent="deleteSelectedDialog"
+        :default-viewport="{ zoom: 0.5 }" :max-zoom="4" :min-zoom="0.1"
+      > 
+        <template #node-custom="nodePropsCustom">
+          <CustomNode v-bind="nodePropsCustom" />
+        </template>
+        <template #node-cusin="nodePropsCusin">
+          <CusinNode v-bind="nodePropsCusin" />
+        </template>    
+        <template #node-cusout="nodePropsCusout">
+          <CusoutNode v-bind="nodePropsCusout" />
+        </template>                   
+        <Background/>
+      </VueFlow>
+      <DeleteConfirmDialog v-model:show="showDelete" />
     </div>
 </template>
 <script setup>
@@ -33,7 +33,7 @@ import CustomNode from './CustomNode.vue';
 import CusinNode from './CusinNode.vue'
 import CusoutNode from './CusoutNode.vue'
 import { emitter } from '../../event-bus';
-
+import DeleteConfirmDialog from './DeleteConfirmDialog.vue'
 
 //Dagre
 import dagre from 'dagre';
@@ -202,11 +202,27 @@ emitter.on('goal-text-edit-blur',  ()=>{
 
 //Deleting Action
 const { nodes: vfNodes, edges: vfEdges, setNodes, setEdges } = useVueFlow()
+const showDelete = ref(false)
 
-function deleteSelected() {
+const sendNodes = ref('')
+
+function deleteSelectedDialog(){
+  showDelete.value = true
+}
+
+emitter.on('goal-delete-selected', ()=>{
+  deleteSelected()
+  showDelete.value = false
+})
+
+async function deleteSelected() {
   if(deleteable.value){
     const selectedNodes = vfNodes.value.filter(n => n.selected)
     const selectedNodeIds = selectedNodes.map(n => n.id)
+
+    if (selectedNodeIds.includes('Administrator-ACT-000000')) {
+      return
+    }
 
     const edgesToDelete = vfEdges.value.filter(edge =>
       selectedNodeIds.includes(edge.target) || selectedNodeIds.includes(edge.source)
@@ -239,29 +255,47 @@ function deleteSelected() {
       e => selectedNodeIds.includes(e.source)
     )
 
+    // OLD MULTIDELTE
+    // selectedNodeIds.forEach((node)=>{
+    //   console.log(filteredEdges)
+    //   filteredEdges.forEach(edge => {
+    //     const childId = edge.target
 
-    selectedNodeIds.forEach((node)=>{
-      console.log(filteredEdges)
-      filteredEdges.forEach(edge => {
-        const childId = edge.target
+    //     const siblings = vfEdges.value.filter(
+    //       e => e.target === childId && e.id !== edge.id
+    //     )
 
-        const siblings = vfEdges.value.filter(
-          e => e.target === childId && e.id !== edge.id
-        )
+    //     const compiledSources = siblings.map(e => e.source).join(',')
 
-        const compiledSources = siblings.map(e => e.source).join(',')
+    //     console.log(compiledSources)
+    //     goalNode.setValue.submit({
+    //       name: edge.target,
+    //       parent_action: compiledSources,
+    //     })
 
-        console.log(compiledSources)
-        goalNode.setValue.submit({
-          name: edge.target,
-          parent_action: compiledSources,
-        })
+    //   })
+    // })    
 
-      })
-    })    
-    selectedNodeIds.forEach(nodeId => {
-      goalNode.delete.submit(nodeId)
+  const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+  const sorted = [...selectedNodeIds].sort((a, b) => {
+    const na = Number(a.split('-').pop())
+    const nb = Number(b.split('-').pop())
+    return nb - na // highest → lowest
+  })
+
+  for (const nodeId of sorted) {
+    await goalNode.setValue.submit({
+      name: nodeId,
+      parent_action: null,
     })
+  }
+
+  await sleep(1) 
+
+  for (const nodeId of selectedNodeIds) {
+    await goalNode.delete.submit(nodeId)
+  }
 
     nodes.value = updatedNodes
     edges.value = updatedEdges
@@ -277,23 +311,23 @@ const {
   onEdgesChange 
 } = useVueFlow()
 
-onConnect((event) => {
-  const previous = goalNode.data.filter(goal => goal.name === event.target)[0].parent_action
+// onConnect((event) => {
+//   const previous = goalNode.data.filter(goal => goal.name === event.target)[0].parent_action
 
-  edges.value.push({
-    id: `${event.source}-${event.targe}`,
-    source: event.source,
-    target: event.target,
-    animated: true
-})  
+//   edges.value.push({
+//     id: `${event.source}-${event.targe}`,
+//     source: event.source,
+//     target: event.target,
+//     animated: true
+// })  
 
-  dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+//   dagreNode.value = layoutWithDagre(nodes.value , edges.value)
 
-  goalNode.setValue.submit({
-    name: event.target,
-    parent_action: `${previous},${event.source}`
-  })
-})
+//   goalNode.setValue.submit({
+//     name: event.target,
+//     parent_action: `${previous},${event.source}`
+//   })
+// })
 
 onEdgeClick((event)=>{
   dagreNode.value.edges = edges.value.map(e =>
@@ -323,52 +357,52 @@ emitter.on('goal-node-selected', (data)=>{
   nodeSelected.value = true
 })
 
-function deleteSelectedEdges(e) {
-  if (e.key !== 'Delete' && e.key !== 'Backspace') return
-  if (nodeSelected.value) return
+// function deleteSelectedEdges(e) {
+//   if (e.key !== 'Delete' && e.key !== 'Backspace') return
+//   if (nodeSelected.value) return
 
 
-  const deletedEdges = dagreNode.value.edges.filter(edge => edge.selected)
+//   const deletedEdges = dagreNode.value.edges.filter(edge => edge.selected)
 
-  const deletedSources = new Set(deletedEdges.map(e => e.target))
-
-
-  const connectedEdges = dagreNode.value.edges.filter(
-    edge => !edge.selected && deletedSources.has(edge.target)
-  )
-  const combinedSources = connectedEdges.map(e => e.source).join(',')
-  console.log("edge deletion trig", combinedSources)
-  if (combinedSources === ''){
-    emitter.emit('toast', {
-      title: "Node Deletion Error ",
-      description: "Deletion would result in nodes without parent edges",
-      theme: "red"
-    })
-    return
-  }
-
-  dagreNode.value.edges = dagreNode.value.edges.filter(
-    edge => !edge.selected
-  )
-  edges.value = dagreNode.value.edges
-
-  dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+//   const deletedSources = new Set(deletedEdges.map(e => e.target))
 
 
-  console.log(combinedSources)
-    goalNode.setValue.submit({
-    name: deletedSources,
-    parent_action: combinedSources
-  })
-}
+//   const connectedEdges = dagreNode.value.edges.filter(
+//     edge => !edge.selected && deletedSources.has(edge.target)
+//   )
+//   const combinedSources = connectedEdges.map(e => e.source).join(',')
+//   console.log("edge deletion trig", combinedSources)
+//   if (combinedSources === ''){
+//     emitter.emit('toast', {
+//       title: "Node Deletion Error ",
+//       description: "Deletion would result in nodes without parent edges",
+//       theme: "red"
+//     })
+//     return
+//   }
 
-onMounted(() => {
-  window.addEventListener('keydown', deleteSelectedEdges)
-})
+//   dagreNode.value.edges = dagreNode.value.edges.filter(
+//     edge => !edge.selected
+//   )
+//   edges.value = dagreNode.value.edges
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', deleteSelectedEdges)
-})
+//   dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+
+
+//   console.log(combinedSources)
+//     goalNode.setValue.submit({
+//     name: deletedSources,
+//     parent_action: combinedSources
+//   })
+// }
+
+// onMounted(() => {
+//   window.addEventListener('keydown', deleteSelectedEdges)
+// })
+
+// onUnmounted(() => {
+//   window.removeEventListener('keydown', deleteSelectedEdges)
+// })
 
 
 </script>

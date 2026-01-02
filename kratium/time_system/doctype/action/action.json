@@ -48,12 +48,12 @@
   "witkin",
   "hciotkn",
   "truth_claims",
-  "wats",
   "watba",
+  "wats",
   "goal_planning_tab",
   "goal_planning_section",
-  "what_is_the_base_goal",
-  "what_is_the_nature_of_the_base_goal",
+  "witbg",
+  "witnofbg",
   "data_collection_tab",
   "data_processing_tab",
   "pert_section",
@@ -365,16 +365,7 @@
    "label": "BaseGoal?"
   },
   {
-   "fieldname": "what_is_the_base_goal",
-   "fieldtype": "Small Text",
-   "label": "What is the Base Goal?"
-  },
-  {
-   "fieldname": "what_is_the_nature_of_the_base_goal",
-   "fieldtype": "Text Editor",
-   "label": "What is the nature of the Base Goal?"
-  },
-  {
+   "depends_on": "eval: doc.goal",
    "fieldname": "truth_claims",
    "fieldtype": "Table",
    "label": "Truth Claims",
@@ -429,25 +420,19 @@
    "label": "Do I have the Knowledge?"
   },
   {
-   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "depends_on": "eval: !doc.dihtk && doc.goal",
    "fieldname": "witkin",
    "fieldtype": "Text Editor",
    "label": "What is the Knowledge I need?"
   },
   {
-   "depends_on": "eval: !doc.do_i_have_the_knowledge && doc.goal",
+   "depends_on": "eval: !doc.dihtk && doc.goal",
    "fieldname": "hciotkn",
    "fieldtype": "Text Editor",
    "label": "How can I obtain the Knowledge needed?"
   },
   {
-   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
-   "fieldname": "wats",
-   "fieldtype": "Text Editor",
-   "label": "What are the States?"
-  },
-  {
-   "depends_on": "eval: doc.do_i_have_the_knowledge && doc.goal",
+   "depends_on": "eval: doc.dihtk && doc.goal",
    "fieldname": "watba",
    "fieldtype": "Text Editor",
    "label": "What are the Bridging Actions"
@@ -458,6 +443,21 @@
    "fieldtype": "Select",
    "label": "Type",
    "options": "custom\ncusin\ncusout\nBaseAction"
+  },
+  {
+   "fieldname": "witbg",
+   "fieldtype": "Small Text",
+   "label": "What is the Base Goal?"
+  },
+  {
+   "fieldname": "witnofbg",
+   "fieldtype": "Text Editor",
+   "label": "What is the nature of the Base Goal?"
+  },
+  {
+   "fieldname": "wats",
+   "fieldtype": "Text Editor",
+   "label": "What are the States?"
   }
  ],
  "grid_page_length": 50,
@@ -465,7 +465,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-01-02 14:01:04.218496",
+ "modified": "2026-01-02 19:23:55.729905",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",
