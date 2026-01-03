@@ -481,7 +481,6 @@ async function editOnSucess(val, { resetForm }) {
     action_name: val.GoalName,
     start_date: val.start_date,
     end_date: val.end_date,
-    is_group: 1,
     witg: val.witg,
     witnotg: val.witnotg,
     wfwis: val.wfwis,

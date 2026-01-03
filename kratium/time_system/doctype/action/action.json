@@ -51,9 +51,6 @@
   "watba",
   "wats",
   "goal_planning_tab",
-  "goal_planning_section",
-  "witbg",
-  "witnofbg",
   "data_collection_tab",
   "data_processing_tab",
   "pert_section",
@@ -347,11 +344,6 @@
    "label": "Action Planning"
   },
   {
-   "fieldname": "goal_planning_section",
-   "fieldtype": "Section Break",
-   "label": "Goal Planning"
-  },
-  {
    "default": "0",
    "fieldname": "oncriticalpath",
    "fieldtype": "Check",
@@ -445,16 +437,7 @@
    "options": "custom\ncusin\ncusout\nBaseAction"
   },
   {
-   "fieldname": "witbg",
-   "fieldtype": "Small Text",
-   "label": "What is the Base Goal?"
-  },
-  {
-   "fieldname": "witnofbg",
-   "fieldtype": "Text Editor",
-   "label": "What is the nature of the Base Goal?"
-  },
-  {
+   "depends_on": "eval: doc.dihtk && doc.goal",
    "fieldname": "wats",
    "fieldtype": "Text Editor",
    "label": "What are the States?"
@@ -465,7 +448,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-01-02 19:23:55.729905",
+ "modified": "2026-01-03 19:17:24.711054",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

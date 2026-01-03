@@ -115,6 +115,11 @@ const isNew = ref(false)
 let goalNode = createListResource({
   doctype: 'Action',
   fields: ['name', 'action_name', 'type', 'parent_action'],
+  filters: {
+    event: 0,
+    todo: 0,
+    // type: 'BaseAction'
+  }
   
 })
 goalNode.fetch()
@@ -148,7 +153,6 @@ async function setCurrentNodes(){
 
   dagreNode.value = layoutWithDagre(nodes.value, edges.value)
   Loading.value = false
-  console.log(Loading.value, "end")
 }
 goalNode.list.promise.then(() => {
   if (isNew.value) {
@@ -177,6 +181,7 @@ async function addAction(data, nodeType){
     return max
   }
 
+
   const max = getMaxNodeIndex(goalNode.data)
   const newId = `Administrator-ACT-${String(max + 1).padStart(6, '0')}`
   function currentDateMidnight() {
@@ -192,7 +197,8 @@ async function addAction(data, nodeType){
     parent_action: data.parentId,
     type: nodeType,
     start_date: currentDateMidnight(),
-    end_date: currentDateMidnight()
+    end_date: currentDateMidnight(),
+    is_group: 1
 
   })
   

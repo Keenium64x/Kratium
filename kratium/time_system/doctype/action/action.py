@@ -56,12 +56,13 @@ class Action(NestedSet):
 
         self.name = f"{prefix}{idx:06d}"
 
-    def validate(self):     
+    def validate(self):  
+        self.group_time()   
         self.validate_goals()    
         self.sync_milestone_dates()
         self.compute_duration()
         self.check_leaf()
-
+        
 
     def validate_goals(self):
         goal = self.goal or 0
@@ -111,3 +112,33 @@ class Action(NestedSet):
 
         if self.rgt == self.lft + 1:
             self.leaf = 1
+
+
+    def group_time(self):
+        if not self.is_group:
+            return
+
+    def group_time(self):
+        if not self.is_group:
+            return
+
+        children = frappe.get_all(
+            "Action",
+            filters={
+                "parent_action": self.name,
+                "milestone": 0,
+                "owner": self.owner,
+                "start_date": ["is", "set"],
+                "end_date": ["is", "set"],
+            },
+            fields=["start_date", "end_date"],
+        )
+
+        if not children:
+            return
+
+        earliest_start = min(c.start_date for c in children if c.start_date)
+        latest_end = max(c.end_date for c in children if c.end_date)
+
+        self.start_date = earliest_start.strftime("%Y-%m-%d 00:00:00")
+        self.end_date = latest_end.strftime("%Y-%m-%d 00:00:00")

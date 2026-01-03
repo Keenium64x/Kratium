@@ -92,9 +92,9 @@ def get_final_action_list(view_mode, calendar):
     condition_actions = frappe.qb.get_query(
         "Action",
         fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner,}
+        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner, }
         ).run(as_dict=True) 
-
+# "type": ["not in", ["BaseAction"]]
     condition_event_actions = frappe.qb.get_query(
         "Action",
         fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
