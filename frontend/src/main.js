@@ -1,5 +1,15 @@
 import { createApp } from "vue"
 
+import './firebase'
+
+  Notification.requestPermission().then((permission) => {
+    if (permission === 'granted') {
+      console.log('Notification permission granted.');
+	}
+  })
+
+
+
 import App from "./App.vue"
 import router from "./router"
 import { initSocket } from "./socket"

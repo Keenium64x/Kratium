@@ -1,6 +1,93 @@
 import frappe
+from frappe.utils import now_datetime
+from firebase_admin import messaging
+from kratium.firebase.fcm import init_firebase
+
+#Cross Platform Notification
+@frappe.whitelist()
+def register_device(token, device_type="web"):
+    user = frappe.session.user
+    if user == "Guest":
+        frappe.throw("Not logged in")
+
+    existing = frappe.db.get_value(
+        "FCM Device",
+        {"token": token},
+        "name"
+    )
+
+    if existing:
+        frappe.db.set_value(
+            "FCM Device",
+            existing,
+            {
+                "last_seen": now_datetime(),
+                "enabled": 1,
+                "user": user,
+            },
+        )
+        return existing
+
+    doc = frappe.get_doc({
+        "doctype": "FCM Device",
+        "user": user,
+        "token": token,
+        "device_type": device_type,
+        "last_seen": now_datetime(),
+        "enabled": 1,
+    })
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+def notify_user(user, title, body, data=None):
+    init_firebase()
+
+    tokens = frappe.get_all(
+        "FCM Device",
+        filters={"user": user, "enabled": 1},
+        pluck="token",
+    )
+
+    if not tokens:
+        return "No devices"
+
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title=title,
+            body=body,
+        ),
+        data=data or {},
+        tokens=tokens,
+    )
+
+    return messaging.send_each_for_multicast(message)
+
+@frappe.whitelist()
+def send_notification(user, title, body, data=None):
+    frappe.enqueue(
+        method=notify_user,
+        queue="long",          
+        timeout=300,
+        user=user,
+        title=title,
+        body=body,
+        data=data,
+    )
+
+@frappe.whitelist()
+def schedule_notification(user, title, body, run_at, data=None):
+    frappe.enqueue_at(
+        get_datetime(run_at),
+        notify_user,
+        queue="long",
+        user=user,
+        title=title,
+        body=body,
+        data=data,
+    )
 
 
+#Action Filter
 @frappe.whitelist()
 def get_final_action_list(view_mode, calendar):
     owner = frappe.session.user
