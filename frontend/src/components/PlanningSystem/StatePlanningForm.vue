@@ -89,6 +89,16 @@
           />
         </div>        
         
+        <div v-if="activeStep === 1">
+          <p class="block text-xs text-ink-gray-5 !mt-6">Time Range</p>
+          <DateRangePicker
+            v-model="dateRangeValue"
+            variant="subtle"
+            placeholder="Date Filter"
+            class="w-full !my-2"
+          />
+          <ErrorMessage :message="errors.end_date" class="!my-4" />
+        </div>
    
 
         <div v-if="activeStep === 2">
@@ -180,84 +190,126 @@
           />
         </div>
 
-        <div class="flex items-center justify-between w-full" v-if="activeStep != 4">
+        <div
+          v-if="activeStep != 4"
+          class="flex w-full gap-4 items-center justify-between flex-wrap"
+        >
           <FrappeButton
+            class="flex-shrink-0 order-1"
             :variant="'outline'"
             theme="gray"
             size="lg"
-            label="Button"
-            tooltip="Go backwards a step"
             @click="prevStep"
           >
             Back
-          </FrappeButton>          
-            <div class="space-x-2 flex">
-            <div class="space-x-2">
+          </FrappeButton>
+
+          <div
+            class="flex flex-1 min-w-0 gap-4
+                  justify-center
+                  flex-row flex-wrap
+                  order-2"
+          >
+            <div class="flex gap-2 flex-wrap justify-center w-full sm:w-auto !items-center">
               <FrappeButton
+                class="min-w-[120px] flex-shrink-0"
                 :variant="'outline'"
                 theme="gray"
-                size="lg"
-                label="Button"
-                tooltip="Hover for more!"
+                size="md"
+                @click="onClose"
               >
                 Cancel
-              </FrappeButton>  
+              </FrappeButton>
+
               <FrappeButton
+                class="min-w-[120px] flex-shrink-0"
                 :variant="'subtle'"
                 theme="red"
-                size="lg"
-                label="Button"
-                tooltip="Delete State"
+                size="md"
+                @click="onDelete"
               >
                 Delete
-              </FrappeButton>   
-            </div> 
+              </FrappeButton>
+            </div>
 
-            <FrappeButton
-              class="!rounded-full"
-              :variant="'solid'"
-              theme="gray"
-              size="xl"
-              label="Button"
-              tooltip="Add a state"
-            >
-              <Plus />
-            </FrappeButton>  
+            <div class="flex justify-center w-full sm:w-auto">
+            <Popover>
+              <template #target="{ togglePopover }">
+                    <FrappeButton
+                      class="flex-shrink-0 !rounded-full"
+                      :variant="'solid'"
+                      theme="gray"
+                      size="xl"
+                      @click="togglePopover"
+                    >
+                      <Plus />
+                    </FrappeButton>
+              </template>    
+              <template #body-main>
+                <div >
+                  <div v-if="!enterNameCon" class="flex flex-col space-y-2 p-2 text-ink-gray-9">
+                    <Button
+                    :variant="'outline'"
+                    size="lg"
+                    @click.stop="enterName('custom')"
+                    >
+                    ▲ State Goal
+                    </Button>
+                    <Button
+                    :variant="'outline'"
+                    size="lg"
+                    @click.stop="enterName('cusout')"
+                    >
+                    ■  Base Goal
+                    </Button>    
+                  </div>  
+                  <div v-if="enterNameCon" class="p-4">
+                      <FormControl
+                        :type="'text'"
+                        size="lg"
+                        variant="subtle"
+                        placeholder="Finish Studies"
+                        label="Enter Name"
+                        v-model="NameInput"
+                        @keydown.enter.prevent="onAdd()"
+                      />
+                  </div>      
+                </div>
+              </template>  
+            </Popover>  
+            </div>
 
-            <div class="space-x-2">
+            <div class="flex gap-2 flex-wrap justify-center w-full sm:w-auto items-center">
               <FrappeButton
+                class="min-w-[120px] flex-shrink-0"
                 :variant="'subtle'"
                 theme="blue"
-                size="lg"
-                label="Button"
-                tooltip="Link to the knowledge base"
+                size="md"
               >
                 Repo
-              </FrappeButton>                
+              </FrappeButton>
+
               <FrappeButton
+                class="min-w-[120px] flex-shrink-0"
                 :variant="'subtle'"
                 theme="green"
-                size="lg"
-                label="Button"
-                tooltip="Save the current values"
+                size="md"
                 @click="onSubmit"
               >
                 Save
-              </FrappeButton> 
-            </div>                              
+              </FrappeButton>
+            </div>
           </div>
 
           <FrappeButton
+            class="flex-shrink-0 order-3"
             :variant="'solid'"
             theme="gray"
-            size="lg"
-            label="Button"
-            tooltip="Go forwards a step"
+            size="md"
             @click="nextStep"
           >
-            {{ activeStep != 3? 'Next' : 'Submit' }}
-          </FrappeButton>    
-                
+            {{ activeStep != 3 ? 'Next' : 'Submit' }}
+          </FrappeButton>
         </div>
       <div class="flex items-center justify-center w-full" v-if="activeStep === 4">
         <DotLottieVue
@@ -267,12 +319,12 @@
           src="/Checkmark.lottie"
         />
       </div>
-      
+      <DeleteConfirmDialog v-model:show="showDelete" />
     </div>
 </template>
 <script setup>
 import {ref, watch} from 'vue'
-import { ErrorMessage, createDocumentResource, TimePicker, FormControl, DateTimePicker, Textarea, TextEditor } from 'frappe-ui'
+import { ErrorMessage, createDocumentResource, TimePicker, DateRangePicker, FormControl, DateTimePicker, Textarea, TextEditor, Popover } from 'frappe-ui'
 import { Button as FrappeButton } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
@@ -280,6 +332,8 @@ import {emitter} from '../../event-bus'
 import { Hourglass, Plus, Trash2 } from 'lucide-vue-next'
 import { getDockviewApi } from '../../dockviewApi'
 import { DotLottieVue } from '@lottiefiles/dotlottie-vue'
+import DeleteConfirmDialog from './DeleteConfirmDialog.vue'
+
 
 const sleep = ms =>
   new Promise(resolve => setTimeout(resolve, ms))
@@ -291,6 +345,8 @@ async function nextStep() {
   if (!valid) return
   if(activeStep.value === 3){
     activeStep.value = Math.min(activeStep.value + 1, steps.length + 1)
+    onSubmit()
+    console.log('trig')
     await sleep(700)
     panel.value.api.close()
   }
@@ -301,6 +357,10 @@ async function nextStep() {
 
 function prevStep() {
   activeStep.value = Math.max(activeStep.value - 1, 1)
+}
+
+function onClose(){
+  panel.value.api.close()
 }
 
 
@@ -315,6 +375,7 @@ import { shallowRef, onMounted, nextTick } from 'vue'
 
 const api = shallowRef(null)
 const panel = shallowRef(null)
+const statePanel = shallowRef(null)
 const id = ref('')
 
 
@@ -322,6 +383,7 @@ onMounted(async () => {
   await nextTick()          
   api.value = getDockviewApi()
   panel.value = api?.value.getPanel('StatePlanningForm')
+  statePanel.value = api?.value.getPanel('StatePlanning')
 
 })
 
@@ -342,6 +404,7 @@ emitter.on('goal-open-node', (data) => {
     doctype: 'Action',
     name: data.id,
   })  
+  id.value = data.id
   updateStateGoal.get.promise.then(()=>{
     Goal.value = updateStateGoal.get.data
   })  
@@ -353,6 +416,7 @@ emitter.on('goal-open-node', (data) => {
 //Validation
 const editFormSchema = yup.object({
   GoalName: yup.string().required().label("Goal Name"),
+
 })
 
 const {
@@ -377,12 +441,17 @@ const [hciotkn, hciotknAttrs] = defineField('hciotkn')
 const [wats, watsAttrs] = defineField('wats')
 const [watba, watbaAttrs] = defineField('watba')
 
+const [start_date, start_dateAttrs] = defineField('start_date')
+const [end_date, end_dateAttrs] = defineField('end_date')
+const [constraints, constraintsAttrs] = defineField('constraints')
 
+const dateRangeValue = ref(null)
 
 watch(()=>Goal.value, (val) => {
-  
   setValues({
     GoalName: val.action_name,
+    start_date: val.start_date,
+    end_date: val.end_date,
     witg: val.witg,
     witnotg: val.witnotg,
     wfwis: val.wfwis,
@@ -393,29 +462,43 @@ watch(()=>Goal.value, (val) => {
     watba: val.watba
   })
 
+  function concatDates(startDate, endDate) {
+    return `${startDate},${endDate}`
+  }
+
+  dateRangeValue.value = concatDates(val.start_date, val.end_date)
 
 })
 
 
 async function editOnSucess(val, { resetForm }) {
-  console.log(val)
   let dupdateStateGoal = createDocumentResource({
     doctype: 'Action',
     name: id.value,
 })
 
-dupdateStateGoal.setValue.submit({
-  name: id.value,
-  action_name: val.GoalName,
-  witg: val.witg,
-  witnotg: val.witnotg,
-  wfwis: val.wfwis,
-  dihtk: val.dihtkm,
-  witkin: val.witkin,
-  hciotkn: val.hciotkn,
-  wats: val.wats,
-  watba: val.watba,
-})
+  await dupdateStateGoal.setValue.submit({
+    action_name: val.GoalName,
+    start_date: val.start_date,
+    end_date: val.end_date,
+    is_group: 1,
+    witg: val.witg,
+    witnotg: val.witnotg,
+    wfwis: val.wfwis,
+    dihtk: val.dihtkm,
+    witkin: val.witkin,
+    hciotkn: val.hciotkn,
+    wats: val.wats,
+    watba: val.watba,
+  })
+
+  emitter.emit('goal-form-updated')     
+
+  emitter.emit('toast', {
+  title: `Goal ${val.GoalName} Updated`,
+  description: "",
+  theme: "green"
+})     
 }
 
 function editOnFail(){
@@ -425,10 +508,47 @@ function editOnFail(){
 const onSubmit = handleSubmit(editOnSucess, editOnFail)
 
 
-async function onDelete(){
-     
+
+watch(() => dateRangeValue.value, (val) => {
+  if (!val) return
+
+  const [start_date, end_date] = val.split(',')
+
+  setValues({
+    start_date,
+    end_date,
+  })
+})
+
+const showDelete = ref(false)
+
+function onDelete(){
+  statePanel.value = api?.value.getPanel('StatePlanning')
+  if (statePanel.value === undefined){
+    show.value = true
+    showDelete.value = true
+  }
+  else{
+  emitter.emit('goal-form-delete') 
+  }
+
 }
 
+emitter.on('goal-deleted', ()=>{
+  panel.value.api.close()
+})
+
+emitter.on('goal-delete-selected', async ()=>{
+  if (statePanel.value === undefined){
+  // let tupdateStateGoal = createDocumentResource({
+  //   doctype: 'Action',
+  //   name: id.value,
+  // })  
+  // await tupdateStateGoal.delete.submit(id.value)  
+  show.value = false
+  panel.value.api.close()
+  }
+})
 
 
 import { Check, Circle, Dot,  } from 'lucide-vue-next'
@@ -438,7 +558,7 @@ const steps = [
   {
     step: 1,
     title: 'Details',
-    description: 'Provide infirmation about the state',
+    description: 'Provide information about the state',
   },
   {
     step: 2,
@@ -451,6 +571,39 @@ const steps = [
     description: 'Declare Child States and Bridging Actions',
   },
 ]
+
+
+emitter.on('goal-name-edit', ()=>{
+  let tupdateStateGoal = createDocumentResource({
+    doctype: 'Action',
+    name: id.value,
+  })  
+  tupdateStateGoal.get.promise.then(()=>{
+    Goal.value = tupdateStateGoal.get.data
+  })    
+})
+
+
+
+//adding
+const popover = ref(true)
+const enterNameCon = ref(false)
+const type = ref('custom')
+const NameInput = ref('')
+
+function enterName(nodeType){
+  enterNameCon.value = true
+  type.value = nodeType
+}
+
+function onAdd() {
+  emitter.emit('goal-add-node', { parentId: id.value, type: type.value, name: NameInput.value })
+  enterNameCon.value = false
+}
+
+
+
+
 
 
 </script>

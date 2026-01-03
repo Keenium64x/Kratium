@@ -92,14 +92,19 @@ def get_final_action_list(view_mode, calendar):
     condition_actions = frappe.qb.get_query(
         "Action",
         fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner}
+        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner,}
         ).run(as_dict=True) 
 
+    condition_event_actions = frappe.qb.get_query(
+        "Action",
+        fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
+        filters={"name": ["in", final_action_name], "milestone": 0, "owner": owner, "full_day": 0}
+        ).run(as_dict=True)     
 
     event_actions = frappe.qb.get_query(
         "Action",
         fields=["name", "action_name", "start_date", "end_date", "estimated_hours", "color", "parent_action", "full_day","event"],
-        filters={"event": 1, "milestone": 0, "owner": owner}
+        filters={"event": 1, "milestone": 0, "owner": owner, "full_day": 0}
         ).run(as_dict=True) 
 
 
@@ -116,8 +121,8 @@ def get_final_action_list(view_mode, calendar):
             )
     else:
         if view_mode == "Day":
-            formatted_condition_actions = []
-            for a in condition_actions:
+            formatted_condition_event_actions = []
+            for a in condition_event_actions:
                 start = a["start_date"]
                 end = a["end_date"]
 
@@ -127,8 +132,8 @@ def get_final_action_list(view_mode, calendar):
                 item["fromTime"] = start.strftime("%H:%M")
                 item["toTime"] = end.strftime("%H:%M")
 
-                formatted_condition_actions.append(item)            
-            for action in formatted_condition_actions:
+                formatted_condition_event_actions.append(item)            
+            for action in formatted_condition_event_actions:
                 final_object.append(
                     {
                         "title": action["action_name"],

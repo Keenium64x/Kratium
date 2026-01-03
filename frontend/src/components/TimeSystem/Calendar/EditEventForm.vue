@@ -269,6 +269,7 @@ watch(event, (val) => {
 
 async function editOnSucess(values, { resetForm }) {
   if (!updateEvent) return
+  await updateEvent.reload()
 
   await updateEvent.setValue.submit({
     name: event.value.calendarEvent.id,
@@ -278,7 +279,7 @@ async function editOnSucess(values, { resetForm }) {
     color: values.eventColor,
     full_day: values.eventFullDay,
   })
-
+  await updateEvent.reload()
   resetForm()
   show.value = false
   emitter.emit('event-update')

@@ -52,8 +52,20 @@
 
 <script setup>
 import { createResource, LoadingText, Button } from 'frappe-ui'
-import { watch, ref, computed, onMounted, watchEffect, nextTick } from 'vue'
+import { watch, ref, computed, onMounted, watchEffect, nextTick, shallowRef } from 'vue'
 import { emitter } from '../../event-bus'
+
+
+const api = shallowRef(null)
+const panel = shallowRef(null)
+
+onMounted(async () => {
+  await nextTick()          
+  api.value = getDockviewApi()
+  panel.value = api?.value.getPanel('Gantt')
+})
+
+
 
 const ganttLoading = ref(true)
 
@@ -80,6 +92,7 @@ watch(view, async () => {
 let gantt = null
 const ganttHeight = 700
 
+
 watchEffect(async () => {
     await nextTick()  
     let final_actions_initial = createResource({
@@ -103,14 +116,17 @@ watchEffect(async () => {
         progress: 0,
       }))
       
-
+      setTimeout(10000)
+      if (true){
       gantt = new Gantt('#gantt', tasks, {
         container_height: ganttHeight,
         view_mode: view.value,
         readonly: true,
         scroll_to: "today"
       })
-      gantt.scroll_current()
+      gantt.scroll_current()        
+      }
+
   })
 })
 
@@ -148,16 +164,16 @@ function updateGantt(){
 })}
 
 import {getDockviewApi} from '../../dockviewApi'
-const api = getDockviewApi()
 
-emitter.on('actions_updated', (event) => {
-  if (api.getPanel('Gantt')){
+
+emitter.on('event-updated', (event) => {
+  if (!(api.value.getPanel('Calendar') === undefined)){
     updateGantt()
   }
 })
 
-emitter.on('todos_updated', (event) => {
-  if (api.getPanel('Gantt') && view.value === 'Day'){
+emitter.on('todo-updated', (event) => {
+  if (!(api.value.getPanel('Gantt') === undefined) && view.value === 'Day'){
     updateGantt()
   }
 })

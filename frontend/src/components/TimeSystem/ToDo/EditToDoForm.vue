@@ -178,7 +178,7 @@
 </template>
 <script setup>
 import {ref, watch} from 'vue'
-import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl, DateTimePicker } from 'frappe-ui'
+import { ErrorMessage, createDocumentResource, TimePicker, Dialog, FormControl, DateTimePicker, Button } from 'frappe-ui'
 import * as yup from 'yup'
 import {useForm} from 'vee-validate'    
 import {emitter} from '../../../event-bus'
@@ -312,7 +312,7 @@ async function editOnSucess(values, { resetForm }) {
   })
   resetForm()
   show.value = false
-  emitter.emit('todo-update')
+  emitter.emit('todo-updated')
 
   emitter.emit('toast', {
   title: "Todo Updated",

@@ -1,6 +1,7 @@
 <template>
     <div class="h-[100vh] m-2">
       <VueFlow
+        v-if="!Loading"
         :nodes="dagreNode.nodes"
         :edges="dagreNode.edges"
         :nodes-draggable="false"
@@ -22,18 +23,38 @@
         <Background/>
       </VueFlow>
       <DeleteConfirmDialog v-model:show="showDelete" />
+      <LoadingText
+        v-if="Loading"
+        text="Loading States..."
+        class="absolute inset-0 flex items-center justify-center text-5xl scale-150"
+      />
     </div>
 </template>
 <script setup>
-import { ref, onMounted, watch, watchEffect, onUnmounted } from 'vue'
+import { ref, onMounted, watch, watchEffect, onUnmounted, nextTick, shallowRef } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background';
-import { createListResource, Popover } from 'frappe-ui'
+import { createListResource, Popover, LoadingText } from 'frappe-ui'
 import CustomNode from './CustomNode.vue';
 import CusinNode from './CusinNode.vue'
 import CusoutNode from './CusoutNode.vue'
 import { emitter } from '../../event-bus';
 import DeleteConfirmDialog from './DeleteConfirmDialog.vue'
+import {getDockviewApi} from '../../dockviewApi'
+
+const Loading = ref(true)
+
+const api = shallowRef(null)
+const panel = shallowRef(null)
+
+onMounted(async () => {
+  await nextTick()          
+  api.value = getDockviewApi()
+  panel.value = api?.value.getPanel('Gantt')
+})
+
+
+
 
 //Dagre
 import dagre from 'dagre';
@@ -99,12 +120,9 @@ let goalNode = createListResource({
 goalNode.fetch()
 const dagreNode = ref({ nodes: [], edges: [] })
  
-goalNode.list.promise.then(() => {
-  if (isNew.value) {
-    isNew.value = false
-    return
-  }
 
+async function setCurrentNodes(){
+  await goalNode.fetch()
   goalNode.data.forEach((data) => {
     if (data.type === 'BaseAction') return    
     nodes.value.push({
@@ -129,6 +147,15 @@ goalNode.list.promise.then(() => {
   })
 
   dagreNode.value = layoutWithDagre(nodes.value, edges.value)
+  Loading.value = false
+  console.log(Loading.value, "end")
+}
+goalNode.list.promise.then(() => {
+  if (isNew.value) {
+    isNew.value = false
+    return
+  }  
+  setCurrentNodes()
 })
 
 
@@ -209,6 +236,10 @@ const sendNodes = ref('')
 function deleteSelectedDialog(){
   showDelete.value = true
 }
+
+emitter.on('goal-form-delete', ()=>{
+  deleteSelectedDialog()
+})
 
 emitter.on('goal-delete-selected', ()=>{
   deleteSelected()
@@ -297,10 +328,12 @@ async function deleteSelected() {
     await goalNode.delete.submit(nodeId)
   }
 
-    nodes.value = updatedNodes
-    edges.value = updatedEdges
+  nodes.value = updatedNodes
+  edges.value = updatedEdges
 
-    dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+  dagreNode.value = layoutWithDagre(nodes.value , edges.value)
+  
+  emitter.emit('goal-deleted')
 
   }
 }
@@ -404,6 +437,28 @@ emitter.on('goal-node-selected', (data)=>{
 //   window.removeEventListener('keydown', deleteSelectedEdges)
 // })
 
+
+
+emitter.on('goal-form-updated', async () => {
+  if (!(api.value.getPanel('StatePlanning') === undefined)){
+    Loading.value = true
+    setCurrentNodes()
+  }
+})
+
+
+emitter.on('todo-updated', async () => {
+  if (!(api.value.getPanel('ToDo') === undefined)){
+    setCurrentNodes()
+  }
+})
+
+emitter.on('event-updated', async () => {
+  if (!(api.value.getPanel('Calendar') === undefined)){
+    Loading.value = true
+    setCurrentNodes()
+  }
+})
 
 </script>
 <style>

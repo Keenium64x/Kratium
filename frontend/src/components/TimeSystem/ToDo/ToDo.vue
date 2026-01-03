@@ -144,14 +144,25 @@
 </template>
 <script setup>
 import { ListView, createListResource, FormControl, LoadingText, ErrorMessage, Popover, DateRangePicker } from 'frappe-ui';
-import { reactive, ref, watch, computed, onMounted, nextTick, watchEffect }  from 'vue'
-
+import { reactive, ref, watch, computed, onMounted, nextTick, watchEffect, shallowRef }  from 'vue'
+import {getDockviewApi} from '../../../dockviewApi'
 import { Plus, Circle, CircleCheck, Star, Info } from 'lucide-vue-next';
 import ToDoContainer from './ToDoContainer.vue';
 import CreateToDoForm from './EditToDoForm.vue';
 import { useDraggable, useDroppable } from '@vue-dnd-kit/core';
 import { Sortable, SortableItem } from '../../Sortable/index';
 import { emitter } from '../../../event-bus';
+
+const api = shallowRef(null)
+const panel = shallowRef(null)
+
+onMounted(async () => {
+  await nextTick()          
+  api.value = getDockviewApi()
+  panel.value = api?.value.getPanel('Gantt')
+})
+
+
 
 const toDoValue = ref("")
 const showEdit = ref(false)
@@ -230,24 +241,20 @@ watch(
   },
   { immediate: true }
 )
-import {getDockviewApi} from '../../../dockviewApi'
-const api = getDockviewApi()
+
 emitter.on('todos_updated', (event) => {
-  if (api.getPanel('ToDo')){
+  if (!(api.value.getPanel('ToDo') === undefined)){
     todos.fetch()
   }
 })
 
-emitter.on('actions_updated', (event) => {
-  if (api.getPanel('ToDo')){
-    todos.fetch()
+emitter.on('event-updated', async (event) => {
+  if (!(api.value.getPanel('Calendar') === undefined)){
+    loading.value = true
+    await todos.fetch()
   }
 })
-emitter.on('event-updated', (event) => {
-  if (api.getPanel('ToDo')){
-    todos.fetch()
-  }
-})
+
 
 function ymd(d) {
   return d.toISOString().slice(0, 10)

@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { Handle } from '@vue-flow/core'
 import { Plus } from 'lucide-vue-next'
 import { emitter } from '../../event-bus'
@@ -131,19 +131,21 @@ watch(
 )
 
 
-
+let goalNode = null
 const nodeLabel = ref(props.data.label)
 
-let goalNode = createDocumentResource({
+
+function onEnter() {
+  goalNode = createDocumentResource({
   doctype: 'Action',
   name: props.id,
 })
-
-function onEnter() {
+  
   goalNode.setValue.submit({
     name: props.id,
-    label: nodeLabel.value
+    action_name: nodeLabel.value
   })
+  emitter.emit('goal-name-edit')
 }
 
 const isEditing = ref(false)
@@ -155,13 +157,19 @@ function onFocus() {
 }
 
 function onBlur() {
+  goalNode = createDocumentResource({
+  doctype: 'Action',
+  name: props.id,
+})
+
   isEditing.value = false
   if (nodeLabel.value != labelref.value){
     goalNode.setValue.submit({
     name: props.id,
-    label: nodeLabel.value
+    action_name: nodeLabel.value
   })  
   }
+  emitter.emit('goal-name-edit')
   emitter.emit('goal-text-edit-blur')
 }
 

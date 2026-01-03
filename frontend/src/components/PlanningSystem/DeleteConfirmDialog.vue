@@ -43,6 +43,7 @@ import { emitter } from '../../event-bus'
 
 const show = defineModel('show')
 
+
 function onDelete(){
     emitter.emit('goal-delete-selected')
 }

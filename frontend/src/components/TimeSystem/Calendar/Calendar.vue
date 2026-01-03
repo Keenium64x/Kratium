@@ -30,10 +30,21 @@
 </template>
 <script setup>
 import { Calendar, createResource, createDocumentResource, LoadingText } from 'frappe-ui';
-import {ref, watch, computed, nextTick, reactive } from 'vue'
+import {ref, watch, computed, nextTick, reactive, shallowRef } from 'vue'
 import EditEventForm from './EditEventForm.vue';
 import NewEventForm from './NewEventForm.vue';
 import {getDockviewApi} from '../../../dockviewApi'
+
+const api = shallowRef(null)
+const panel = shallowRef(null)
+
+onMounted(async () => {
+  await nextTick()          
+  api.value = getDockviewApi()
+  panel.value = api?.value.getPanel('Gantt')
+})
+
+
 
 const viewMode = ref('Month')
 const notLoading = ref(true)
@@ -96,12 +107,12 @@ async function setEvents(){
       if (viewMode.value === 'Month'){
         await calendarActions.fetch()
         events.value = calendarActions.data
-        emitter.emit('actions_updated')
+        emitter.emit('event-updated')
       }
       else{
         await dailyActions.fetch()
         events.value = dailyActions.data
-        emitter.emit('actions_updated')
+        emitter.emit('event-updated')
       }
   })
 }
@@ -110,7 +121,6 @@ setEvents()
 // update sync
 async function sendUpdate(event) {
   const url = `/api/v2/document/Action/${event.id}`
-  console.log(event)
   const payload = {
     id: event.id,
     action_name: event.title,
@@ -129,7 +139,7 @@ async function sendUpdate(event) {
     body: JSON.stringify(payload),
     credentials: 'include', 
   })
-  emitter.emit('actions_updated')
+  emitter.emit('event-updated')
 }
 
 
@@ -210,10 +220,9 @@ async function onModeChange(mode) {
   }
 }
 
-const api = getDockviewApi()
 
-emitter.on('todos_updated', ()=>{
-  if (api.getPanel('Calendar') && !(viewMode === 'Month')){  
+emitter.on('todo-updated', ()=>{
+  if (!(api.value.getPanel('Calendar') === undefined) && !(viewMode === 'Month')){  
     onModeChange(viewMode.value)
   }
 })
