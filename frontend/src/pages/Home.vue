@@ -243,24 +243,32 @@ emitter.on('toast',  (data)=>{
 
 
 import { getToken } from 'firebase/messaging'
-import { messaging } from './../firebase'
+import { messaging } from '../firebase'
 import { call } from 'frappe-ui'
 
 async function registerFCM() {
-  const token = await getToken(messaging, {
-    vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
-  })
+  try {
+    const token = await getToken(messaging, {
+      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+    })
 
-  if (!token) return
+    if (!token) return
 
-  await call('kratium.api.register_device', {
-    token,
-    device_type: 'web',
-  })
-  console.log('setup', token)
+
+    await call('kratium.api.register_device', {
+      token,
+      platform: 'webapp',
+    })
+
+    console.log('FCM setup complete:', token)
+  } catch (err) {
+    console.error('FCM registration failed:', err)
+  }
 }
+onMounted(async ()=>{
+  registerFCM()
+})
 
-registerFCM()
 </script>
 <style>
 .toast-reset {

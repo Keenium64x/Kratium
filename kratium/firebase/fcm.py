@@ -13,16 +13,3 @@ def init_firebase():
         firebase_admin.initialize_app(cred)
 
 
-def send_push(token, title, body, data=None):
-    init_firebase()
-
-    message = messaging.Message(
-        notification=messaging.Notification(
-            title=title,
-            body=body,
-        ),
-        data=data or {},
-        token=token,
-    )
-
-    return messaging.send(message)

@@ -1,6 +1,5 @@
-import { initializeApp } from 'firebase/app'
-import { getAnalytics } from "firebase/analytics";
-import { getMessaging, getToken, onMessage } from 'firebase/messaging'
+import { initializeApp } from "firebase/app";
+import { getMessaging, onMessage } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBh9fwqcVpMN5SFNG6EH9q9ovo4cDbmXzA",
@@ -8,22 +7,26 @@ const firebaseConfig = {
   projectId: "kratium-6238d",
   storageBucket: "kratium-6238d.firebasestorage.app",
   messagingSenderId: "894098574304",
-  appId: "1:894098574304:web:d18715699f80dd7ef03985",
-  measurementId: "G-89D56E8XQW"
+  appId: "1:894098574304:web:c036fa462c84d8a2f03985",
+  measurementId: "G-ZFXSMG8X5V",
 };
 
-const app = initializeApp(firebaseConfig)
-const analytics = getAnalytics(app);
+const BASE_URL = "http://kratium.localhost:8083"; 
 
-export const messaging = getMessaging(app)
-getToken(messaging, {vapidKey: "BH-rCzskY5Qt5KK52kDZsCN8sz95jIdHccX_PjshclWdHQWFig6WgE07s0pJ3R1-9Pl15oY8twI7GHYHxGXgHxs"})
-
-export default app
+const app = initializeApp(firebaseConfig);
+export const messaging = getMessaging(app);
 
 onMessage(messaging, (payload) => {
-  console.log('FCM foreground message:', payload)
+  const { title, body, route } = payload.data || {};
+  const url = route ? `${BASE_URL}${route.startsWith("/") ? route : `/${route}`}` : BASE_URL;
 
-  new Notification(payload.notification.title, {
-    body: payload.notification.body
-  })
-})
+  const notification = new Notification(title || "Notification", {
+    body,
+    data: { url },
+  });
+
+  notification.onclick = (e) => {
+    e.preventDefault();
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+});

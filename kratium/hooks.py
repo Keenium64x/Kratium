@@ -86,7 +86,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "kratium.install.before_install"
-# after_install = "kratium.install.after_install"
+after_install = "kratium.install.after_install"
 
 # Uninstallation
 # ------------

@@ -2,12 +2,16 @@ import { createApp } from "vue"
 
 import './firebase'
 
-  Notification.requestPermission().then((permission) => {
-    if (permission === 'granted') {
-      console.log('Notification permission granted.');
-	}
+Notification.requestPermission().then((permission) => {
+if (permission === 'granted') {
+	console.log('Notification permission granted.');
+}
+})
+navigator.serviceWorker.register("/firebase-messaging-sw.js")
+  .then((registration) => {
+    console.log("SW registered:", registration);
   })
-
+  .catch((err) => console.error("SW registration failed:", err));
 
 
 import App from "./App.vue"

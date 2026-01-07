@@ -1,29 +1,85 @@
 import frappe
+from frappe.utils.background_jobs import enqueue
 from frappe.utils import now_datetime
 from firebase_admin import messaging
 from kratium.firebase.fcm import init_firebase
+from kratium.auth_guard import jwt_required
+from frappe import _
 
-#Cross Platform Notification
-@frappe.whitelist()
-def register_device(token, device_type="web"):
-    user = frappe.session.user
-    if user == "Guest":
-        frappe.throw("Not logged in")
 
-    existing = frappe.db.get_value(
-        "FCM Device",
-        {"token": token},
-        "name"
+@frappe.whitelist(allow_guest=True)
+def mobile_token_exists(token_hash: str):
+    if not token_hash:
+        return {"ok": False}
+
+    row = frappe.db.get_value(
+        "Mobile Auth Token",
+        {"token_hash": token_hash},
+        ["name", "expires_at"],
+        as_dict=True,
     )
+
+    if not row:
+        return {"ok": False}
+
+
+    if row.expires_at and row.expires_at <= now_datetime():
+        return {"ok": False}
+
+    return {"ok": True}
+
+@frappe.whitelist(allow_guest=True)
+def revoke_mobile_token(token_hash: str):
+    if not token_hash:
+        return {"ok": False}
+    frappe.db.delete("Mobile Auth Token", {"token_hash": token_hash})
+    frappe.db.commit()
+    return {"ok": True}
+
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def register_device(token, platform):
+    user = getattr(frappe.local, "jwt_user", None)
+    if not user or user == "Guest":
+        frappe.throw("Not authenticated")
+
+    platform_map = {
+        "android": "android",
+        "ios": "ios",
+        "web": "web",
+        "windows": "windows",
+        "linux": "linux",
+        "webapp": "webapp",
+        "macos": "macos",
+    }
+
+    device_type = platform_map.get(platform.lower())
+    if not device_type:
+        frappe.throw("Unsupported platform")
+
+
+    frappe.db.sql(
+        """
+        DELETE FROM `tabFCM Device`
+        WHERE user = %s
+          AND device_type = %s
+          AND last_seen < DATE_SUB(NOW(), INTERVAL 1 HOUR)
+        """,
+        (user, device_type),
+    )
+
+    existing = frappe.db.get_value("FCM Device", {"token": token}, "name")
 
     if existing:
         frappe.db.set_value(
             "FCM Device",
             existing,
             {
-                "last_seen": now_datetime(),
-                "enabled": 1,
                 "user": user,
+                "device_type": device_type,
+                "enabled": 1,
+                "last_seen": now_datetime(),
             },
         )
         return existing
@@ -33,12 +89,16 @@ def register_device(token, device_type="web"):
         "user": user,
         "token": token,
         "device_type": device_type,
-        "last_seen": now_datetime(),
         "enabled": 1,
+        "last_seen": now_datetime(),
     })
     doc.insert(ignore_permissions=True)
     return doc.name
 
+
+
+
+@frappe.whitelist()
 def notify_user(user, title, body, data=None):
     init_firebase()
 
@@ -51,28 +111,45 @@ def notify_user(user, title, body, data=None):
     if not tokens:
         return "No devices"
 
+    # Merge title/body into data payload
+    data_payload = {"title": title, "body": body}
+    if data:
+        data_payload.update(data)
+
     message = messaging.MulticastMessage(
-        notification=messaging.Notification(
-            title=title,
-            body=body,
-        ),
-        data=data or {},
+        data=data_payload,  # only data, no notification
         tokens=tokens,
     )
 
-    return messaging.send_each_for_multicast(message)
+    response = messaging.send_each_for_multicast(message)
 
-@frappe.whitelist()
+    if response.failure_count > 0:
+        failures = []
+        for idx, resp in enumerate(response.responses):
+            if not resp.success:
+                failures.append({
+                    "token": tokens[idx],
+                    "error": str(resp.exception),
+                    "code": getattr(resp.exception, "code", None),
+                })
+
+        frappe.log_error(title="FCM send failure", message=failures)
+        frappe.throw(f"FCM send failed: {failures}")
+
+    return {"success": response.success_count, "failure": response.failure_count}
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
 def send_notification(user, title, body, data=None):
     frappe.enqueue(
-        method=notify_user,
-        queue="long",          
+        method="kratium.api.notify_user",
+        queue="long",
         timeout=300,
         user=user,
         title=title,
         body=body,
         data=data,
-    )
+)
 
 @frappe.whitelist()
 def schedule_notification(user, title, body, run_at, data=None):
@@ -88,9 +165,11 @@ def schedule_notification(user, title, body, run_at, data=None):
 
 
 #Action Filter
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
+@jwt_required
 def get_final_action_list(view_mode, calendar):
-    owner = frappe.session.user
+    owner = getattr(frappe.local, "jwt_user", None) or frappe.session.user
+
     calendar = str(calendar).lower()
 
     view_mode = (view_mode or "").strip('"')
