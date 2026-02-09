@@ -15,10 +15,15 @@
   "estimated_hours",
   "column_break_ggqb",
   "color",
-  "reminder",
   "ancestor",
   "parent_action",
   "is_group",
+  "lifecycle_section",
+  "reminder",
+  "reminder_type",
+  "reminder_interval",
+  "column_break_elqj",
+  "status",
   "types_section",
   "todo",
   "completed",
@@ -441,6 +446,32 @@
    "fieldname": "wats",
    "fieldtype": "Text Editor",
    "label": "What are the States?"
+  },
+  {
+   "fieldname": "lifecycle_section",
+   "fieldtype": "Section Break",
+   "label": "Lifecycle"
+  },
+  {
+   "fieldname": "reminder_type",
+   "fieldtype": "Select",
+   "label": "Reminder Type",
+   "options": "Once\nUntil Completion\nBefore Completion\nSnooze"
+  },
+  {
+   "fieldname": "reminder_interval",
+   "fieldtype": "Duration",
+   "label": "Reminder Interval"
+  },
+  {
+   "fieldname": "column_break_elqj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Upcoming\nIn Progress\nCompleted"
   }
  ],
  "grid_page_length": 50,
@@ -448,7 +479,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-01-03 19:17:24.711054",
+ "modified": "2026-02-02 18:43:48.902281",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

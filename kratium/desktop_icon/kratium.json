@@ -1,0 +1,30 @@
+{
+ "app": "kratium",
+ "creation": "2026-02-01 20:48:36.714060",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "",
+ "icon_type": "Folder",
+ "idx": 0,
+ "label": "Kratium",
+ "link": "/app/build",
+ "link_to": "",
+ "link_type": "External",
+ "logo_url": "/assets/frappe/images/frappe-framework-logo.svg",
+ "modified": "2026-02-01 21:13:56.187330",
+ "modified_by": "Administrator",
+ "name": "Kratium",
+ "owner": "Administrator",
+ "parent_icon": "",
+ "roles": [
+  {
+   "role": "All"
+  },
+  {
+   "role": "Administrator"
+  }
+ ],
+ "sidebar": "",
+ "standard": 1
+}

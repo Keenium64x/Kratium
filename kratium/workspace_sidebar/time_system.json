@@ -1,0 +1,39 @@
+{
+ "app": "kratium",
+ "creation": "2026-02-01 21:18:41.170152",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "alarm-clock",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "gantt",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Action",
+   "link_to": "Action",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "alarm-clock",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reminder",
+   "link_to": "Reminder Master",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-02-01 21:18:41.170152",
+ "modified_by": "Administrator",
+ "name": "Time System",
+ "owner": "Administrator",
+ "title": "Time System"
+}

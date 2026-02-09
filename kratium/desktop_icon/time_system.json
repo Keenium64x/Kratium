@@ -1,0 +1,25 @@
+{
+ "app": "kratium",
+ "creation": "2026-02-01 21:16:59.638146",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "chart-gantt",
+ "icon_type": "Link",
+ "idx": 0,
+ "label": "Time System",
+ "link_to": "Build",
+ "link_type": "Workspace",
+ "modified": "2026-02-01 21:20:20.675991",
+ "modified_by": "Administrator",
+ "name": "Time System",
+ "owner": "Administrator",
+ "parent_icon": "Kratium",
+ "roles": [
+  {
+   "role": "All"
+  }
+ ],
+ "sidebar": "Time System",
+ "standard": 1
+}

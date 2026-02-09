@@ -28,6 +28,15 @@ def hour_diff(dt1, dt2) -> float:
     t2 = to_datetime(dt2)
     return round((t2 - t1).total_seconds() / 3600, 0)
 
+def parse_interval(interval_str):
+    pattern = r'(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?'
+    h, m, s = re.match(pattern, interval_str).groups()
+    return timedelta(
+        hours=int(h or 0),
+        minutes=int(m or 0),
+        seconds=int(s or 0),
+    )
+
 class Action(NestedSet):
     def autoname(self):
         user = frappe.session.user
@@ -62,7 +71,11 @@ class Action(NestedSet):
         self.sync_milestone_dates()
         self.compute_duration()
         self.check_leaf()
-        
+        self.validate_lifectye()
+
+
+    def after_insert(self):
+        self.sync_reminder()        
 
     def validate_goals(self):
         goal = self.goal or 0
@@ -142,3 +155,54 @@ class Action(NestedSet):
 
         self.start_date = earliest_start.strftime("%Y-%m-%d 00:00:00")
         self.end_date = latest_end.strftime("%Y-%m-%d 00:00:00")
+
+    def validate_lifectye(self):
+        if self.status == 'Completed':
+            self.completed = true
+
+
+    def sync_reminder(self):
+        if not self.reminder:
+            return
+
+        now = now_datetime()
+
+        # only fire when reminder is due
+        if self.reminder > now:
+            return
+
+        reminder_name = f"{self.name}-{self.reminder}"
+
+        # avoid duplicates for same timestamp
+        if frappe.db.exists("Reminder Master", reminder_name):
+            return
+
+        reminder = frappe.new_doc("Reminder Master")
+        reminder.name1 = reminder_name
+        reminder.description = self.description
+        reminder.reminder_for = self.name
+        reminder.remind_at = self.reminder
+        reminder.owner = self.owner
+        reminder.save(ignore_permissions=True)
+
+        # handle recurrence
+        if self.reminder_type == "Until Completion" and self.status != "Completed":
+            interval = self._parse_interval(self.reminder_interval)
+            self.reminder = self.reminder + interval
+            self.db_set("reminder", self.reminder)
+
+        # Once → nothing else happens
+
+    def _parse_interval(self, interval_str: str) -> timedelta:
+        """
+        Parses '9h 35m 34s' into timedelta
+        """
+        h = m = s = 0
+        for value, unit in re.findall(r'(\d+)\s*([hms])', interval_str.lower()):
+            if unit == "h":
+                h = int(value)
+            elif unit == "m":
+                m = int(value)
+            elif unit == "s":
+                s = int(value)
+        return timedelta(hours=h, minutes=m, seconds=s)

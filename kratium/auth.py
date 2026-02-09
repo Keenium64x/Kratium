@@ -6,10 +6,10 @@ import requests
 
 JWT_SECRET = frappe.conf.get("jwt_secret")  # put in site_config.json
 JWT_ALGO = "HS256"
-JWT_EXP_DAYS = 90
+JWT_EXP_DAYS = 3
 
 def confirm_credentials(email, password):
-    base = frappe.conf.host_name or "kratium.localhost:8003"
+    base = "herta-diphyllous-nonsufferably.ngrok-free.dev" 
 
 
     url = f"http://{base}/api/method/login"

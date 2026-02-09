@@ -5,6 +5,7 @@ from firebase_admin import messaging
 from kratium.firebase.fcm import init_firebase
 from kratium.auth_guard import jwt_required
 from frappe import _
+from frappe.utils import get_datetime
 
 
 @frappe.whitelist(allow_guest=True)
@@ -97,7 +98,6 @@ def register_device(token, platform):
 
 
 
-
 @frappe.whitelist()
 def notify_user(user, title, body, data=None):
     init_firebase()
@@ -105,20 +105,34 @@ def notify_user(user, title, body, data=None):
     tokens = frappe.get_all(
         "FCM Device",
         filters={"user": user, "enabled": 1},
-        pluck="token",
+        fields=["token", "device_type"],
     )
 
     if not tokens:
         return "No devices"
 
-    # Merge title/body into data payload
-    data_payload = {"title": title, "body": body}
+    data_payload = {}
     if data:
-        data_payload.update(data)
+        data_payload.update({k: str(v) for k, v in data.items()})
+
+    # ALWAYS include title/body in data for web
+    data_payload.update({
+        "title": title,
+        "body": body,
+    })
 
     message = messaging.MulticastMessage(
-        data=data_payload,  # only data, no notification
-        tokens=tokens,
+        data=data_payload,
+        tokens=[t.token for t in tokens],
+
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=title,
+                body=body,
+                channel_id="default",
+            ),
+        ),
     )
 
     response = messaging.send_each_for_multicast(message)
@@ -128,15 +142,18 @@ def notify_user(user, title, body, data=None):
         for idx, resp in enumerate(response.responses):
             if not resp.success:
                 failures.append({
-                    "token": tokens[idx],
+                    "token": tokens[idx].token,
                     "error": str(resp.exception),
                     "code": getattr(resp.exception, "code", None),
                 })
 
-        frappe.log_error(title="FCM send failure", message=failures)
+        frappe.log_error("FCM send failure", failures)
         frappe.throw(f"FCM send failed: {failures}")
 
-    return {"success": response.success_count, "failure": response.failure_count}
+    return {
+        "success": response.success_count,
+        "failure": response.failure_count,
+    }
 
 @frappe.whitelist(allow_guest=True)
 @jwt_required
@@ -162,6 +179,12 @@ def schedule_notification(user, title, body, run_at, data=None):
         body=body,
         data=data,
     )
+
+
+def has_app_permission():
+    return True
+
+
 
 
 #Action Filter
@@ -348,3 +371,58 @@ def get_final_action_list(view_mode, calendar):
 
 
 
+
+
+
+
+
+
+
+
+#Grocery Stock Calculations
+#Conver UOM
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def convert_qty(qty, from_uom, to_uom):
+    if from_uom == to_uom:
+        return qty
+
+    factor = frappe.get_value(
+        "UOM Conversion",
+        {
+            "from_uom": from_uom,
+            "to_uom": to_uom
+        },
+        "factor"
+    )
+
+    if not factor:
+        frappe.throw(
+            f"No UOM conversion from {from_uom} to {to_uom}"
+        )
+
+    return qty * factor
+
+
+#Grocery bin(cache) Rebuild
+def rebuild_grocery_bins():
+    frappe.db.sql("DELETE FROM `tabGrocery Bin`")
+
+    rows = frappe.db.sql("""
+        SELECT
+            grocery,
+            location,
+            SUM(actual_qty) AS qty
+        FROM `tabGrocery Stock Ledger Entry`
+        WHERE is_cancelled = 0
+        GROUP BY grocery, location
+        HAVING qty != 0
+    """, as_dict=True)
+
+    for r in rows:
+        frappe.get_doc({
+            "doctype": "Grocery Bin",
+            "grocery": r.grocery,
+            "location": r.location,
+            "actual_qty": r.qty
+        }).insert(ignore_permissions=True)

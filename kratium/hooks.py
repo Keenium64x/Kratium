@@ -11,15 +11,15 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "kratium",
-# 		"logo": "/assets/kratium/logo.png",
-# 		"title": "Kratium",
-# 		"route": "/kratium",
-# 		"has_permission": "kratium.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "kratium",
+		"logo": "/assets/kratium/logo.png",
+		"title": "Kratium",
+		"route": "/kratium",
+		"has_permission": "kratium.api.has_app_permission"
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -149,6 +149,15 @@ doc_events = {
 
 # Scheduled Tasks
 # ---------------
+
+scheduler_events = {
+    "cron": {
+        "* * * * *": [
+            "kratium.tasks.reminders.dispatch_reminders",
+            "kratium.tasks.reminders.reminder_scheduler"
+        ]
+    }
+}
 
 # scheduler_events = {
 # 	"all": [

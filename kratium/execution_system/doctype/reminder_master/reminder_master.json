@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-01-07 17:54:22.626531",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reminder_section",
+  "name1",
+  "description",
+  "status",
+  "reminder_type",
+  "reminder_interval",
+  "reminder_for",
+  "remind_at",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "name1",
+   "fieldtype": "Data",
+   "label": "Name",
+   "unique": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "reminder_for",
+   "fieldtype": "Link",
+   "label": "Reminder For",
+   "options": "Action"
+  },
+  {
+   "fieldname": "remind_at",
+   "fieldtype": "Datetime",
+   "label": "Remind At"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Reminder Master",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reminder_section",
+   "fieldtype": "Section Break",
+   "label": "Reminder"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nFired"
+  },
+  {
+   "fieldname": "reminder_type",
+   "fieldtype": "Select",
+   "label": "Reminder Type",
+   "options": "Once\nUntil Completion\nBefore Completion\nSnooze"
+  },
+  {
+   "fieldname": "reminder_interval",
+   "fieldtype": "Duration",
+   "label": "Reminder Interval"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-02-02 19:01:25.470463",
+ "modified_by": "Administrator",
+ "module": "Execution System",
+ "name": "Reminder Master",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "name1"
+}

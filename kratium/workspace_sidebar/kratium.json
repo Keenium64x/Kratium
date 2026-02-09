@@ -1,0 +1,39 @@
+{
+ "app": "kratium",
+ "creation": "2026-02-01 21:00:34.149261",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "align-end-horizontal",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "atom",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Action",
+   "link_to": "Action",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "alarm-clock",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reminders",
+   "link_to": "Reminder Master",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-02-01 21:00:34.149261",
+ "modified_by": "Administrator",
+ "name": "Kratium",
+ "owner": "Administrator",
+ "title": "Kratium"
+}
