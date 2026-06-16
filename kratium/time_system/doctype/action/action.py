@@ -3,9 +3,9 @@ import frappe
 from frappe.model.document import Document
 from frappe.model.naming import make_autoname
 from frappe.utils.nestedset import NestedSet
-from datetime import datetime
+from datetime import datetime, timedelta
 import frappe
-
+from frappe.utils import now_datetime
 
 
 DT_FMT  = "%Y-%m-%d %H:%M:%S"
@@ -158,7 +158,7 @@ class Action(NestedSet):
 
     def validate_lifectye(self):
         if self.status == 'Completed':
-            self.completed = true
+            self.completed = True
 
 
     def sync_reminder(self):

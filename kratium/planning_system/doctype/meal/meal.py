@@ -1,26 +1,20 @@
 import frappe
-import re
 from frappe.model.document import Document
 
 class Meal(Document):
-
     def validate(self):
-        self.validate_grocery_items()
+        self.sync_grocery_uom()
 
-    def validate_grocery_items(self):
+    def sync_grocery_uom(self):
         for row in self.table_groceries:
-            self._validate_and_format_quantity(row)
+            if not row.grocery:
+                continue
 
-    def _validate_and_format_quantity(self, row):
-        if not row.base_uom:
-            frappe.throw("Base UOM is required in grocery row")
+            row.uom = frappe.db.get_value(
+                "Grocery",
+                row.grocery,
+                "base_uom"
+            )
 
-        if not row.quantity:
-            frappe.throw("Quantity is required in grocery row")
-
-        match = re.fullmatch(r"\s*(\d+(\.\d+)?)\s*", row.quantity)
-        if not match:
-            frappe.throw("Quantity must be a number only")
-
-        number = match.group(1)
-        row.quantity = f"{number} {row.base_uom}"
+            if row.quantity is None:
+                frappe.throw("Quantity is required")

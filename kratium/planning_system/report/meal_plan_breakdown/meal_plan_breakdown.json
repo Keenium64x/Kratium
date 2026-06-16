@@ -1,0 +1,38 @@
+{
+ "add_total_row": 0,
+ "add_translate_data": 0,
+ "columns": [],
+ "creation": "2026-02-14 20:32:03.009736",
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [
+  {
+   "fieldname": "meal_plan",
+   "fieldtype": "Link",
+   "label": "Meal Plan",
+   "mandatory": 1,
+   "options": "Meal Plan",
+   "wildcard_filter": 0
+  }
+ ],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letter_head": null,
+ "modified": "2026-02-14 20:43:01.710898",
+ "modified_by": "Administrator",
+ "module": "Planning System",
+ "name": "Meal Plan Breakdown",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "query": "SELECT\r\n    g.item AS grocery,\r\n    g.base_uom AS uom,\r\n\r\n    SUM(gi.quantity) AS amount_required,\r\n\r\n    COALESCE((\r\n        SELECT SUM(b.actual_qty)\r\n        FROM `tabGrocery Bin` b\r\n        WHERE b.grocery = g.name\r\n    ), 0) AS stock_available,\r\n\r\n    g.price_per_base_uom AS price_per_unit,\r\n\r\n    SUM(gi.quantity) * g.price_per_base_uom AS total_cost\r\n\r\nFROM `tabMeal Plan` mp\r\n\r\nJOIN `tabMeal Item` mi\r\n    ON mi.parent = mp.name          -- Meal Plan \u2192 Meal Item\r\n\r\nJOIN `tabMeal` m\r\n    ON m.name = mi.meal             -- Meal Item \u2192 Meal\r\n\r\nJOIN `tabGrocery Item` gi\r\n    ON gi.parent = m.name           -- Meal \u2192 Grocery Item\r\n\r\nJOIN `tabGrocery` g\r\n    ON g.name = gi.grocery          -- Grocery Item \u2192 Grocery\r\n\r\nWHERE mp.name = %(meal_plan)s\r\n\r\nGROUP BY g.name\r\nORDER BY g.item;\r\n",
+ "ref_doctype": "Meal Plan",
+ "report_name": "Meal Plan Breakdown",
+ "report_type": "Query Report",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
+ "timeout": 0
+}
