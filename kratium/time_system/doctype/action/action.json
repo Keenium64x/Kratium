@@ -57,7 +57,8 @@
   "wats",
   "goal_planning_tab",
   "data_collection_tab",
-  "data_processing_tab",
+  "execution_system_section",
+  "category",
   "pert_section",
   "optimistic_time",
   "most_likely_time",
@@ -65,17 +66,7 @@
   "column_break_bhxb",
   "expected_time",
   "variance",
-  "standard_deviance",
-  "cpm_section",
-  "forwards_pass_column",
-  "early_start",
-  "early_finish",
-  "leaf",
-  "backwards_pass_column",
-  "late_start",
-  "late_finish",
-  "float",
-  "oncriticalpath"
+  "standard_deviance"
  ],
  "fields": [
   {
@@ -195,16 +186,6 @@
    "label": "MileStone?"
   },
   {
-   "fieldname": "cpm_section",
-   "fieldtype": "Section Break",
-   "label": "CPM"
-  },
-  {
-   "fieldname": "float",
-   "fieldtype": "Data",
-   "label": "Float"
-  },
-  {
    "depends_on": "milestone",
    "fieldname": "milestone_action",
    "fieldtype": "Link",
@@ -218,51 +199,9 @@
    "options": "Constraint"
   },
   {
-   "fieldname": "data_processing_tab",
-   "fieldtype": "Tab Break",
-   "label": "Data Processing"
-  },
-  {
    "fieldname": "data_collection_tab",
    "fieldtype": "Tab Break",
    "label": "Data Collection"
-  },
-  {
-   "fieldname": "forwards_pass_column",
-   "fieldtype": "Column Break",
-   "label": "Forwards Pass"
-  },
-  {
-   "fieldname": "early_start",
-   "fieldtype": "Datetime",
-   "label": "Early Start"
-  },
-  {
-   "fieldname": "early_finish",
-   "fieldtype": "Datetime",
-   "label": "Early Finish"
-  },
-  {
-   "default": "0",
-   "fieldname": "leaf",
-   "fieldtype": "Check",
-   "label": "Leaf?",
-   "read_only": 1
-  },
-  {
-   "fieldname": "backwards_pass_column",
-   "fieldtype": "Column Break",
-   "label": "Backwards Pass"
-  },
-  {
-   "fieldname": "late_start",
-   "fieldtype": "Datetime",
-   "label": "Late Start"
-  },
-  {
-   "fieldname": "late_finish",
-   "fieldtype": "Datetime",
-   "label": "Late Finish"
   },
   {
    "fieldname": "pert_section",
@@ -347,12 +286,6 @@
    "fieldname": "goal_planning_tab",
    "fieldtype": "Tab Break",
    "label": "Action Planning"
-  },
-  {
-   "default": "0",
-   "fieldname": "oncriticalpath",
-   "fieldtype": "Check",
-   "label": "OnCriticalPath?"
   },
   {
    "default": "0",
@@ -472,6 +405,17 @@
    "fieldtype": "Select",
    "label": "Status",
    "options": "Upcoming\nIn Progress\nCompleted"
+  },
+  {
+   "fieldname": "execution_system_section",
+   "fieldtype": "Section Break",
+   "label": "Execution System"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "label": "Category",
+   "options": "Action Category"
   }
  ],
  "grid_page_length": 50,
@@ -479,7 +423,7 @@
  "is_calendar_and_gantt": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-02-02 18:43:48.902281",
+ "modified": "2026-06-17 15:17:37.057925",
  "modified_by": "Administrator",
  "module": "Time System",
  "name": "Action",

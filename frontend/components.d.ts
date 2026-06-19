@@ -8,21 +8,15 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    '(tmp)StatePlanningForm': typeof import('./src/components/PlanningSystem/(tmp)StatePlanningForm.vue')['default']
     AddButton: typeof import('./src/components/Layout/AddButton.vue')['default']
     Button: typeof import('./src/components/ui/button/Button.vue')['default']
     Calendar: typeof import('./src/components/TimeSystem/Calendar/Calendar.vue')['default']
-    copy: typeof import('./src/components/TimeSystem/Gantt copy.vue')['default']
-    CreateToDoForm: typeof import('./src/components/TimeSystem/ToDo/CreateToDoForm.vue')['default']
     CusinNode: typeof import('./src/components/PlanningSystem/CusinNode.vue')['default']
     CusoutNode: typeof import('./src/components/PlanningSystem/CusoutNode.vue')['default']
     CustomNode: typeof import('./src/components/PlanningSystem/CustomNode.vue')['default']
-    DefaultNode: typeof import('./src/components/PlanningSystem/DefaultNode.vue')['default']
     DeleteConfirmDialog: typeof import('./src/components/PlanningSystem/DeleteConfirmDialog.vue')['default']
-    Divider: typeof import('./src/components/PlanningSystem/Divider.vue')['default']
     EditEventForm: typeof import('./src/components/TimeSystem/Calendar/EditEventForm.vue')['default']
     EditToDoForm: typeof import('./src/components/TimeSystem/ToDo/EditToDoForm.vue')['default']
-    Gaantt: typeof import('./src/components/Gaantt.vue')['default']
     Gantt: typeof import('./src/components/TimeSystem/Gantt.vue')['default']
     NewEventForm: typeof import('./src/components/TimeSystem/Calendar/NewEventForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
@@ -30,8 +24,6 @@ declare module 'vue' {
     Sidebar: typeof import('./src/components/Layout/Sidebar.vue')['default']
     Sortable: typeof import('./src/components/Sortable/Sortable.vue')['default']
     SortableItem: typeof import('./src/components/Sortable/SortableItem.vue')['default']
-    StateGoalForm: typeof import('./src/components/PlanningSystem/StateGoalForm.vue')['default']
-    StatePlaasdnningForm: typeof import('./src/components/PlanningSystem/StatePlaasdnningForm.vue')['default']
     StatePlanning: typeof import('./src/components/PlanningSystem/StatePlanning.vue')['default']
     StatePlanningForm: typeof import('./src/components/PlanningSystem/StatePlanningForm.vue')['default']
     Stepper: typeof import('./src/components/ui/stepper/Stepper.vue')['default']
@@ -41,11 +33,8 @@ declare module 'vue' {
     StepperSeparator: typeof import('./src/components/ui/stepper/StepperSeparator.vue')['default']
     StepperTitle: typeof import('./src/components/ui/stepper/StepperTitle.vue')['default']
     StepperTrigger: typeof import('./src/components/ui/stepper/StepperTrigger.vue')['default']
-    Test: typeof import('./src/components/test.vue')['default']
     ToDo: typeof import('./src/components/TimeSystem/ToDo/ToDo.vue')['default']
     ToDoContainer: typeof import('./src/components/TimeSystem/ToDo/ToDoContainer.vue')['default']
-    ValFormControl: typeof import('./src/components/ValFormControl.vue')['default']
-    ValidationFormControl: typeof import('./src/components/ValidationFormControl.vue')['default']
     WatermarkPanel: typeof import('./src/components/Layout/WatermarkPanel.vue')['default']
   }
 }

@@ -1,0 +1,2 @@
+import{ai as a,bm as o,o as n,a6 as s,y as c,ao as r,ab as i,aq as d}from"./index-DF3iChPT.js";const _={name:"Loading",props:{text:{type:String,default:"Loading..."}},components:{LoadingIndicator:o}},m={class:"flex items-center text-base text-ink-gray-4"};function p(l,x,t,g,f,L){const e=d("LoadingIndicator");return n(),s("div",m,[c(e,{class:"-ml-1 mr-2 h-3 w-3"}),r(" "+i(t.text),1)])}const y=a(_,[["render",p]]);export{y as L};
+//# sourceMappingURL=LoadingText-SRc5VgU_.js.map
