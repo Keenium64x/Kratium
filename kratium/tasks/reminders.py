@@ -1,84 +1,175 @@
+from __future__ import annotations
+
+import json
+from datetime import timedelta
+
 import frappe
-from frappe.utils import now
+from frappe.utils import add_to_date, get_datetime, now_datetime
+
+from kratium.notifications import Notification, NotificationDeliveryError, send_notification
+from kratium.reminders import RECURRING_REMINDER_TYPES, interval_seconds
+
+
+MAX_DELIVERY_ATTEMPTS = 5
+STALE_PROCESSING_MINUTES = 15
+RETRY_DELAYS_MINUTES = (1, 5, 15, 30, 60)
+
+
+def dispatch_reminders(limit: int = 200) -> dict[str, int]:
+	"""Claim due reminders and hand each one to a normal background worker."""
+	recovered = recover_stale_reminders()
+	due = frappe.get_all(
+		"Reminder Master",
+		filters={
+			"status": "Pending",
+			"remind_at": ["<=", now_datetime()],
+		},
+		fields=["name"],
+		order_by="remind_at asc",
+		limit=limit,
+	)
+
+	queued = 0
+	for row in due:
+		frappe.db.sql(
+			"""
+			UPDATE `tabReminder Master`
+			SET status = 'Processing', modified = NOW()
+			WHERE name = %s AND status = 'Pending'
+			""",
+			row.name,
+		)
+		if _affected_rows() != 1:
+			continue
+
+		frappe.enqueue(
+			method="kratium.tasks.reminders.deliver_reminder",
+			queue="default",
+			timeout=120,
+			enqueue_after_commit=True,
+			job_id=f"kratium-reminder-{row.name}",
+			deduplicate=True,
+			reminder_name=row.name,
+		)
+		queued += 1
+
+	return {"queued": queued, "recovered": recovered}
+
+
+def deliver_reminder(reminder_name: str) -> dict:
+	doc = frappe.get_doc("Reminder Master", reminder_name, for_update=True)
+	if doc.status not in {"Processing", "Pending"}:
+		return {"status": doc.status, "skipped": True}
+
+	recipient = doc.recipient or doc.owner
+	data = _load_data(doc.data_json)
+	data.setdefault("reminder_id", doc.name)
+	if doc.reminder_for:
+		data.setdefault("action", doc.reminder_for)
+
+	try:
+		result = send_notification(
+			Notification(
+				user=recipient,
+				title=doc.name1,
+				body=doc.description,
+				data=data,
+				route=doc.route,
+				event_type=doc.event_type or "reminder",
+				notification_id=doc.name,
+			),
+			raise_on_total_failure=True,
+		)
+	except Exception as error:
+		_retry_or_fail(doc, error)
+		return {"status": doc.status, "error": str(error)}
+
+	complete_delivery(doc)
+	return {"status": doc.status, "delivery": result}
+
+
+def complete_delivery(doc) -> None:
+	doc.attempt_count = 0
+	doc.last_error = None
+	doc.fired_at = now_datetime()
+
+	if _should_repeat(doc):
+		doc.remind_at = _next_occurrence(doc.remind_at, doc.reminder_interval)
+		doc.status = "Pending"
+	else:
+		doc.status = "Fired"
+
+	doc.save(ignore_permissions=True)
+
+
+def recover_stale_reminders() -> int:
+	stale_before = add_to_date(now_datetime(), minutes=-STALE_PROCESSING_MINUTES)
+	frappe.db.sql(
+		"""
+		UPDATE `tabReminder Master`
+		SET status = 'Pending',
+			last_error = 'Recovered after an interrupted delivery worker',
+			modified = NOW()
+		WHERE status = 'Processing' AND modified <= %s
+		""",
+		stale_before,
+	)
+	return _affected_rows()
+
 
 def reminder_scheduler():
-    now = now_datetime()
+	"""Compatibility entry point retained for older Scheduled Job Type records."""
+	return dispatch_reminders()
 
-    reminders = frappe.get_all(
-        "Reminder Master",
-        filters={
-            "reminder_type": "Until Completion"
-        },
-        fields=[
-            "name",
-            "reminder_for",
-            "remind_at",
-            "reminder_interval"
-        ]
-    )
 
-    for r in reminders:
-        parent = frappe.get_doc("Action", r.reminder_for)
+def _retry_or_fail(doc, error: Exception) -> None:
+	attempt = int(doc.attempt_count or 0) + 1
+	doc.attempt_count = attempt
+	doc.last_error = str(error)[:500]
 
-        # stop polling
-        if parent.status == "Completed":
-            continue
+	if attempt >= MAX_DELIVERY_ATTEMPTS:
+		doc.status = "Failed"
+	else:
+		delay = RETRY_DELAYS_MINUTES[min(attempt - 1, len(RETRY_DELAYS_MINUTES) - 1)]
+		doc.status = "Pending"
+		doc.remind_at = now_datetime() + timedelta(minutes=delay)
 
-        interval = parse_interval(r.reminder_interval)
-        next_time = r.remind_at + interval
+	doc.save(ignore_permissions=True)
 
-        if now >= next_time:
-            new_reminder = frappe.new_doc("Reminder Master")
-            new_reminder.name1 = f"{parent.action_name} Reminder {now.timestamp()}"
-            new_reminder.description = parent.description
-            new_reminder.reminder_for = parent.name
-            new_reminder.remind_at = next_time
-            new_reminder.reminder_type = "Until Completion"
-            new_reminder.reminder_interval = r.reminder_interval
-            new_reminder.owner = parent.owner
-            new_reminder.save(ignore_permissions=True)
 
-            # IMPORTANT: update last reminder time
-            frappe.db.set_value(
-                "Reminder Master",
-                r.name,
-                "remind_at",
-                next_time
-            )
+def _should_repeat(doc) -> bool:
+	if doc.reminder_type not in RECURRING_REMINDER_TYPES:
+		return False
 
-def dispatch_reminders():
-    now_ts = now()
+	if doc.reminder_type == "Until Completion":
+		if not doc.reminder_for or not frappe.db.exists("Action", doc.reminder_for):
+			return False
+		return frappe.db.get_value("Action", doc.reminder_for, "status") != "Completed"
 
-    reminders = frappe.db.sql(
-        """
-        SELECT name, owner, name1, description
-        FROM `tabReminder Master`
-        WHERE status = 'Pending'
-          AND remind_at <= %s
-        LIMIT 200
-        """,
-        now_ts,
-        as_dict=True,
-    )
+	return True
 
-    for r in reminders:
-        frappe.db.sql(
-            """
-            UPDATE `tabReminder Master`
-            SET status = 'Fired'
-            WHERE name = %s
-              AND status = 'Pending'
-            """,
-            r.name,
-        )
 
-        frappe.enqueue(
-            method="kratium.api.notify_user",
-            queue="long",
-            timeout=300,
-            user=r.owner,
-            title=r.name1,
-            body=r.description,
-        )
+def _next_occurrence(previous, interval) -> object:
+	seconds = interval_seconds(interval)
+	if seconds <= 0:
+		raise NotificationDeliveryError("Recurring reminder has no valid interval")
 
-    frappe.db.commit()
+	next_at = get_datetime(previous) + timedelta(seconds=seconds)
+	now = now_datetime()
+	while next_at <= now:
+		next_at += timedelta(seconds=seconds)
+	return next_at
+
+
+def _load_data(value: str | None) -> dict:
+	if not value:
+		return {}
+	try:
+		data = json.loads(value)
+	except (TypeError, json.JSONDecodeError):
+		return {}
+	return data if isinstance(data, dict) else {}
+
+
+def _affected_rows() -> int:
+	return int(getattr(getattr(frappe.db, "_cursor", None), "rowcount", 0) or 0)

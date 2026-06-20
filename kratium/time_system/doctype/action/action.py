@@ -1,11 +1,7 @@
 import re
 import frappe
-from frappe.model.document import Document
-from frappe.model.naming import make_autoname
 from frappe.utils.nestedset import NestedSet
-from datetime import datetime, timedelta
-import frappe
-from frappe.utils import get_datetime, now_datetime
+from datetime import datetime
 
 
 DT_FMT  = "%Y-%m-%d %H:%M:%S"
@@ -27,15 +23,6 @@ def hour_diff(dt1, dt2) -> float:
     t1 = to_datetime(dt1)
     t2 = to_datetime(dt2)
     return round((t2 - t1).total_seconds() / 3600, 0)
-
-def parse_interval(interval_str):
-    pattern = r'(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?'
-    h, m, s = re.match(pattern, interval_str).groups()
-    return timedelta(
-        hours=int(h or 0),
-        minutes=int(m or 0),
-        seconds=int(s or 0),
-    )
 
 class Action(NestedSet):
     def autoname(self):
@@ -75,7 +62,12 @@ class Action(NestedSet):
 
 
     def after_insert(self):
-        self.sync_reminder()        
+        super().after_insert()
+        self.sync_reminder()
+
+    def on_update(self):
+        super().on_update()
+        self.sync_reminder()
 
     def validate_goals(self):
         goal = self.goal or 0
@@ -162,48 +154,6 @@ class Action(NestedSet):
 
 
     def sync_reminder(self):
-        if not self.reminder:
-            return
+        from kratium.reminders import sync_action_reminder
 
-        now = now_datetime()
-        reminder_at = get_datetime(self.reminder)
-
-        # only fire when reminder is due
-        if reminder_at > now:
-            return
-
-        reminder_name = f"{self.name}-{reminder_at}"
-
-        # avoid duplicates for same timestamp
-        if frappe.db.exists("Reminder Master", reminder_name):
-            return
-
-        reminder = frappe.new_doc("Reminder Master")
-        reminder.name1 = reminder_name
-        reminder.description = self.description
-        reminder.reminder_for = self.name
-        reminder.remind_at = reminder_at
-        reminder.owner = self.owner
-        reminder.save(ignore_permissions=True)
-
-        # handle recurrence
-        if self.reminder_type == "Until Completion" and self.status != "Completed":
-            interval = self._parse_interval(self.reminder_interval)
-            self.reminder = reminder_at + interval
-            self.db_set("reminder", self.reminder)
-
-        # Once → nothing else happens
-
-    def _parse_interval(self, interval_str: str) -> timedelta:
-        """
-        Parses '9h 35m 34s' into timedelta
-        """
-        h = m = s = 0
-        for value, unit in re.findall(r'(\d+)\s*([hms])', interval_str.lower()):
-            if unit == "h":
-                h = int(value)
-            elif unit == "m":
-                m = int(value)
-            elif unit == "s":
-                s = int(value)
-        return timedelta(hours=h, minutes=m, seconds=s)
+        return sync_action_reminder(self)

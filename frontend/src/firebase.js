@@ -11,17 +11,24 @@ const firebaseConfig = {
   measurementId: "G-ZFXSMG8X5V",
 };
 
-const BASE_URL = "http://kratium.localhost:8083"; 
+const BASE_URL = window.location.origin;
 
 const app = initializeApp(firebaseConfig);
 export const messaging = getMessaging(app);
 
 onMessage(messaging, (payload) => {
-  const { title, body, route } = payload.data || {};
+  const data = payload.data || {};
+  const title = payload.notification?.title || data.title || "Kratium";
+  const body = payload.notification?.body || data.body || "";
+  const route = data.route;
   const url = route ? `${BASE_URL}${route.startsWith("/") ? route : `/${route}`}` : BASE_URL;
 
-  const notification = new Notification(title || "Notification", {
+  if (Notification.permission !== "granted") return;
+
+  const notification = new Notification(title, {
     body,
+    icon: "/Kratium Icon.jpg",
+    tag: data.notification_id || undefined,
     data: { url },
   });
 

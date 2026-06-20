@@ -389,7 +389,7 @@
    "fieldname": "reminder_type",
    "fieldtype": "Select",
    "label": "Reminder Type",
-   "options": "Once\nUntil Completion\nBefore Completion\nSnooze"
+   "options": "Once\nUntil Completion\nBefore Completion\nSnooze\nFollow Up"
   },
   {
    "fieldname": "reminder_interval",

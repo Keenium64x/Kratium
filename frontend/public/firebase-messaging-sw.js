@@ -11,16 +11,30 @@ firebase.initializeApp({
   measurementId: "G-ZFXSMG8X5V",
 });
 
-const BASE_URL = "https://yourdomain.com"; // <-- change once
+const BASE_URL = self.location.origin;
 
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const { title, body, route } = payload.data || {};
+  const data = payload.data || {};
+  const title = payload.notification?.title || data.title || "Kratium";
+  const body = payload.notification?.body || data.body || "";
+  const route = data.route;
   const url = route ? `${BASE_URL}${route.startsWith("/") ? route : `/${route}`}` : BASE_URL;
+  let actions;
 
-  self.registration.showNotification(title || "Notification", {
+  try {
+    actions = data.actions ? JSON.parse(data.actions) : undefined;
+  } catch (_) {
+    actions = undefined;
+  }
+
+  self.registration.showNotification(title, {
     body,
+    icon: "/Kratium Icon.jpg",
+    badge: "/Kratium Icon.jpg",
+    tag: data.notification_id || undefined,
+    actions,
     data: { url },
   });
 });

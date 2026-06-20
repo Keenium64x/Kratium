@@ -9,18 +9,26 @@
   "name1",
   "description",
   "status",
+  "recipient",
+  "event_type",
+  "route",
+  "data_json",
   "reminder_type",
   "reminder_interval",
   "reminder_for",
   "remind_at",
+  "delivery_section",
+  "attempt_count",
+  "last_error",
+  "fired_at",
   "amended_from"
  ],
  "fields": [
   {
    "fieldname": "name1",
    "fieldtype": "Data",
-   "label": "Name",
-   "unique": 1
+   "label": "Title",
+   "reqd": 1
   },
   {
    "fieldname": "description",
@@ -36,7 +44,8 @@
   {
    "fieldname": "remind_at",
    "fieldtype": "Datetime",
-   "label": "Remind At"
+   "label": "Remind At",
+   "reqd": 1
   },
   {
    "fieldname": "amended_from",
@@ -57,18 +66,65 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Pending\nFired"
+   "options": "Pending\nProcessing\nFired\nFailed\nCancelled"
   },
   {
    "fieldname": "reminder_type",
    "fieldtype": "Select",
    "label": "Reminder Type",
-   "options": "Once\nUntil Completion\nBefore Completion\nSnooze"
+   "options": "Once\nUntil Completion\nBefore Completion\nSnooze\nFollow Up"
   },
   {
    "fieldname": "reminder_interval",
    "fieldtype": "Duration",
    "label": "Reminder Interval"
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Link",
+   "label": "Recipient",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "default": "reminder",
+   "fieldname": "event_type",
+   "fieldtype": "Data",
+   "label": "Event Type"
+  },
+  {
+   "fieldname": "route",
+   "fieldtype": "Data",
+   "label": "Route"
+  },
+  {
+   "fieldname": "data_json",
+   "fieldtype": "Long Text",
+   "label": "Notification Data"
+  },
+  {
+   "fieldname": "delivery_section",
+   "fieldtype": "Section Break",
+   "label": "Delivery"
+  },
+  {
+   "default": "0",
+   "fieldname": "attempt_count",
+   "fieldtype": "Int",
+   "label": "Attempt Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fired_at",
+   "fieldtype": "Datetime",
+   "label": "Last Fired At",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,

@@ -1,11 +1,12 @@
 import frappe
-from frappe.utils.background_jobs import enqueue
 from frappe.utils import now_datetime
-from firebase_admin import messaging
-from kratium.firebase.fcm import init_firebase
 from kratium.auth_guard import jwt_required
-from frappe import _
-from frappe.utils import get_datetime
+from kratium.notifications import Notification, enqueue_notification, send_notification as deliver_notification
+from kratium.reminders import (
+	cancel_reminder as cancel_scheduled_reminder,
+	reschedule_reminder as reschedule_scheduled_reminder,
+	schedule_reminder,
+)
 
 
 @frappe.whitelist(allow_guest=True)
@@ -44,6 +45,8 @@ def register_device(token, platform):
     user = getattr(frappe.local, "jwt_user", None)
     if not user or user == "Guest":
         frappe.throw("Not authenticated")
+    if not token or not str(token).strip():
+        frappe.throw("Device token is required")
 
     platform_map = {
         "android": "android",
@@ -55,20 +58,9 @@ def register_device(token, platform):
         "macos": "macos",
     }
 
-    device_type = platform_map.get(platform.lower())
+    device_type = platform_map.get(str(platform or "").lower())
     if not device_type:
         frappe.throw("Unsupported platform")
-
-
-    frappe.db.sql(
-        """
-        DELETE FROM `tabFCM Device`
-        WHERE user = %s
-          AND device_type = %s
-          AND last_seen < DATE_SUB(NOW(), INTERVAL 1 HOUR)
-        """,
-        (user, device_type),
-    )
 
     existing = frappe.db.get_value("FCM Device", {"token": token}, "name")
 
@@ -97,88 +89,114 @@ def register_device(token, platform):
     return doc.name
 
 
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def unregister_device(token):
+	user = getattr(frappe.local, "jwt_user", None)
+	name = frappe.db.get_value("FCM Device", {"token": token, "user": user}, "name")
+	if not name:
+		return {"unregistered": False}
+	frappe.db.set_value("FCM Device", name, "enabled", 0)
+	return {"unregistered": True, "device": name}
+
+
 
 @frappe.whitelist()
-def notify_user(user, title, body, data=None):
-    init_firebase()
-
-    tokens = frappe.get_all(
-        "FCM Device",
-        filters={"user": user, "enabled": 1},
-        fields=["token", "device_type"],
-    )
-
-    if not tokens:
-        return "No devices"
-
-    data_payload = {}
-    if data:
-        data_payload.update({k: str(v) for k, v in data.items()})
-
-    # ALWAYS include title/body in data for web
-    data_payload.update({
-        "title": title,
-        "body": body,
-    })
-
-    message = messaging.MulticastMessage(
-        data=data_payload,
-        tokens=[t.token for t in tokens],
-
-        android=messaging.AndroidConfig(
-            priority="high",
-            notification=messaging.AndroidNotification(
-                title=title,
-                body=body,
-                channel_id="default",
-            ),
-        ),
-    )
-
-    response = messaging.send_each_for_multicast(message)
-
-    if response.failure_count > 0:
-        failures = []
-        for idx, resp in enumerate(response.responses):
-            if not resp.success:
-                failures.append({
-                    "token": tokens[idx].token,
-                    "error": str(resp.exception),
-                    "code": getattr(resp.exception, "code", None),
-                })
-
-        frappe.log_error("FCM send failure", failures)
-        frappe.throw(f"FCM send failed: {failures}")
-
-    return {
-        "success": response.success_count,
-        "failure": response.failure_count,
-    }
+def notify_user(user, title, body, data=None, route=None, event_type="notification"):
+	"""Send immediately. Kept at the old dotted path for queued-job compatibility."""
+	return deliver_notification(
+		Notification(
+			user=user,
+			title=title,
+			body=body,
+			data=data or {},
+			route=route,
+			event_type=event_type,
+		)
+	)
 
 @frappe.whitelist(allow_guest=True)
 @jwt_required
-def send_notification(user, title, body, data=None):
-    frappe.enqueue(
-        method="kratium.api.notify_user",
-        queue="long",
-        timeout=300,
-        user=user,
-        title=title,
-        body=body,
-        data=data,
-)
+def send_notification(user=None, title=None, body=None, data=None, route=None, event_type="notification"):
+	user = _resolve_notification_user(user)
+	enqueue_notification(
+		user=user,
+		title=title,
+		body=body,
+		data=data,
+		route=route,
+		event_type=event_type,
+	)
+	return {"queued": True, "user": user}
 
-@frappe.whitelist()
-def schedule_notification(user, title, body, run_at, data=None):
-    frappe.enqueue_at(
-        get_datetime(run_at),
-        notify_user,
-        queue="long",
-        user=user,
-        title=title,
-        body=body,
-        data=data,
-    )
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def schedule_notification(
+	user=None,
+	title=None,
+	body=None,
+	run_at=None,
+	data=None,
+	route=None,
+	reminder_type="Once",
+	repeat_every=None,
+	event_type="reminder",
+	action=None,
+):
+	user = _resolve_notification_user(user)
+	name = schedule_reminder(
+		user,
+		title,
+		body,
+		run_at,
+		data=data,
+		route=route,
+		reminder_type=reminder_type,
+		repeat_every=repeat_every,
+		event_type=event_type,
+		action=action,
+	)
+	return {"scheduled": True, "reminder": name, "run_at": run_at}
+
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def reschedule_notification(reminder, run_at):
+	_assert_reminder_access(reminder)
+	return {
+		"scheduled": True,
+		"reminder": reschedule_scheduled_reminder(reminder, run_at),
+		"run_at": run_at,
+	}
+
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def cancel_notification(reminder):
+	_assert_reminder_access(reminder)
+	return {
+		"cancelled": True,
+		"reminder": cancel_scheduled_reminder(reminder),
+	}
+
+
+def _resolve_notification_user(requested_user=None):
+	current_user = getattr(frappe.local, "jwt_user", None) or frappe.session.user
+	if not current_user or current_user == "Guest":
+		frappe.throw("Not authenticated", frappe.PermissionError)
+
+	requested_user = requested_user or current_user
+	if requested_user != current_user and "System Manager" not in frappe.get_roles(current_user):
+		frappe.throw("You can only send notifications to yourself", frappe.PermissionError)
+	return requested_user
+
+
+def _assert_reminder_access(reminder_name):
+	current_user = _resolve_notification_user()
+	recipient = frappe.db.get_value("Reminder Master", reminder_name, "recipient")
+	owner = frappe.db.get_value("Reminder Master", reminder_name, "owner")
+	if current_user not in {recipient, owner} and "System Manager" not in frappe.get_roles(current_user):
+		frappe.throw("Not permitted to change this reminder", frappe.PermissionError)
 
 
 def has_app_permission():

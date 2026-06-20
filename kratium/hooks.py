@@ -153,8 +153,7 @@ doc_events = {
 scheduler_events = {
     "cron": {
         "* * * * *": [
-            "kratium.tasks.reminders.dispatch_reminders",
-            "kratium.tasks.reminders.reminder_scheduler"
+            "kratium.tasks.reminders.dispatch_reminders"
         ]
     }
 }

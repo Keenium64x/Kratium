@@ -1,34 +1,19 @@
 import frappe
 from frappe.model.document import Document
-import re
+from frappe.model.naming import make_autoname
 
 class ReminderMaster(Document):
     def autoname(self):
-        user = frappe.session.user
-        local = user.split("@", 1)[0]
-        safe_local = re.sub(r'[^A-Za-z0-9_-]', '', local)
-
-        self.owner = user
-        prefix = f"{safe_local}-ACT-"
-
-        last = frappe.db.sql(
-            """
-            SELECT name
-            FROM `tabReminder Master`
-            WHERE name LIKE %s
-            ORDER BY name DESC
-            LIMIT 1
-            """,
-            (prefix + "%",),
-            as_dict=True,
-        )
-
-        if not last:
-            idx = 0   
-        else:
-            idx = int(last[0]["name"].split(prefix)[1]) + 1
-
-        self.name = f"{prefix}{idx:06d}"
+        self.name = make_autoname("REM-.YYYY.-.#####")
     
     def before_insert(self):
-        self.status = "Pending"
+        self.status = self.status or "Pending"
+        self.recipient = self.recipient or self.owner or frappe.session.user
+
+    def validate(self):
+        if not self.name1:
+            frappe.throw("Reminder title is required")
+        if not self.recipient:
+            frappe.throw("Reminder recipient is required")
+        if not self.remind_at:
+            frappe.throw("Reminder time is required")
