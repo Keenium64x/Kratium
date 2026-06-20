@@ -380,8 +380,8 @@ def map_schema_to_action_doc(data: dict[str, Any]) -> dict[str, Any]:
 		"doctype": "Action",
 		"action_name": data.get("title"),
 		"description": data.get("description"),
-		"start_date": data.get("start_date"),
-		"end_date": data.get("end_date") or data.get("deadline"),
+		"start_date": to_frappe_datetime(data.get("start_date")),
+		"end_date": to_frappe_datetime(data.get("end_date") or data.get("deadline")),
 		"estimated_hours": data.get("estimated_hours"),
 		"color": data.get("color"),
 		"ancestor": data.get("ancestor"),
@@ -392,7 +392,7 @@ def map_schema_to_action_doc(data: dict[str, Any]) -> dict[str, Any]:
 		"starred": data.get("starred"),
 		"full_day": data.get("full_day"),
 		"routine": data.get("routine"),
-		"reminder": data.get("reminder"),
+		"reminder": to_frappe_datetime(data.get("reminder")),
 		"reminder_type": data.get("reminder_type"),
 		"reminder_interval": data.get("reminder_interval"),
 		"milestone": data.get("milestone"),
@@ -412,6 +412,12 @@ def map_schema_to_action_doc(data: dict[str, Any]) -> dict[str, Any]:
 			for constraint in data.get("constraints", [])
 		],
 	}
+
+
+def to_frappe_datetime(value: str | None) -> Any:
+	if not value:
+		return None
+	return get_datetime(value)
 
 
 def clean_doc_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -509,6 +515,11 @@ def save_words_to_draft(draft: dict[str, Any], field: str, words: list[str]) -> 
 def parse_with_ai(text: str) -> ParseResult:
 	context = {
 		"search_history": [],
+		"available_action_categories": frappe.get_all(
+			"Action Category",
+			fields=["name", "parent_action_category", "is_group"],
+			limit_page_length=20,
+		),
 	}
 	max_steps = 5
 
@@ -614,6 +625,10 @@ def call_ai_model(text: str, schemas: dict[str, Any], context: dict[str, Any]) -
 			raise RuntimeError(f"Ollama returned HTTP {error.code}: {body}") from error
 		except URLError as error:
 			raise RuntimeError(f"Could not connect to Ollama: {error}") from error
+		except TimeoutError as error:
+			raise RuntimeError(
+				f"Ollama timed out after {get_ollama_timeout()} seconds"
+			) from error
 
 	content = ollama_response.get("message", {}).get("content")
 
@@ -726,8 +741,10 @@ def build_ai_system_prompt(schemas: dict[str, Any]) -> str:
 		"Prefer operation='create' for normal add-task commands. "
 		"Use layer='todo' for tasks/to-dos, layer='event' for calendar events, and layer='action' for broader actions. "
 		"Never invent Frappe document names for category, parent_action, ancestor, milestone_action, dependencies, or constraints. "
-		"For create mutations, request an Action Category search when no category was explicitly supplied and no category search "
-		"appears in context. Choose a category only from returned search results. If no matching category is found, set category=null "
+		"For create mutations, first inspect available_action_categories in context. If it is empty, set category=null and "
+		"needs_category_assignment=true without searching. If it contains a clear match, use that exact category name. Otherwise "
+		"request an Action Category search when no category was explicitly supplied and no category search appears in context. "
+		"Choose a category only from returned context or search results. If no matching category is found, set category=null "
 		"and needs_category_assignment=true. "
 		"For create operations, provide both start_date and end_date. If only one time is supplied and duration is unknown, "
 		"use that same datetime for both start_date and end_date. "
@@ -806,6 +823,9 @@ def extract_json_object(text: str) -> dict[str, Any]:
 def validate_ai_response(response: dict[str, Any]) -> AIModelResponse:
 	if isinstance(response.get("response"), dict):
 		response = response["response"]
+
+	if "type" not in response and response.get("schema") in {"mutation", "read"} and "data" in response:
+		response["type"] = "final_schema"
 
 	if hasattr(AIModelResponse, "model_validate"):
 		return AIModelResponse.model_validate(response)
@@ -911,7 +931,17 @@ def normalize_action_times(schema: ActionMutationInput) -> ActionMutationInput:
 	raw_text = (data.get("raw_text") or "").lower()
 
 	due_date = deadline or start_date or end_date
-	has_explicit_range = bool(re.search(r"\bfrom\b.+\b(?:to|until)\b", raw_text))
+	has_explicit_range = bool(
+		re.search(r"\bfrom\b.+\b(?:to|until)\b", raw_text)
+		or re.search(r"\bstart(?:ing)?\b.+\b(?:finish|end)\b", raw_text)
+		or re.search(r"\bbetween\b.+\band\b", raw_text)
+		or (
+			deadline
+			and start_date
+			and end_date
+			and end_date != deadline
+		)
+	)
 
 	if not due_date or has_explicit_range:
 		return schema

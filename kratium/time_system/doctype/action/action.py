@@ -5,7 +5,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils.nestedset import NestedSet
 from datetime import datetime, timedelta
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 
 DT_FMT  = "%Y-%m-%d %H:%M:%S"
@@ -166,12 +166,13 @@ class Action(NestedSet):
             return
 
         now = now_datetime()
+        reminder_at = get_datetime(self.reminder)
 
         # only fire when reminder is due
-        if self.reminder > now:
+        if reminder_at > now:
             return
 
-        reminder_name = f"{self.name}-{self.reminder}"
+        reminder_name = f"{self.name}-{reminder_at}"
 
         # avoid duplicates for same timestamp
         if frappe.db.exists("Reminder Master", reminder_name):
@@ -181,14 +182,14 @@ class Action(NestedSet):
         reminder.name1 = reminder_name
         reminder.description = self.description
         reminder.reminder_for = self.name
-        reminder.remind_at = self.reminder
+        reminder.remind_at = reminder_at
         reminder.owner = self.owner
         reminder.save(ignore_permissions=True)
 
         # handle recurrence
         if self.reminder_type == "Until Completion" and self.status != "Completed":
             interval = self._parse_interval(self.reminder_interval)
-            self.reminder = self.reminder + interval
+            self.reminder = reminder_at + interval
             self.db_set("reminder", self.reminder)
 
         # Once → nothing else happens
