@@ -242,25 +242,36 @@ emitter.on('toast',  (data)=>{
 
 
 
-import { getToken } from 'firebase/messaging'
-import { messaging } from '../firebase'
+import {
+  getBrowserMessagingSupport,
+  registerBrowserMessaging,
+} from '../firebase'
 import { call } from 'frappe-ui'
 
 async function registerFCM() {
   try {
-    const token = await getToken(messaging, {
-      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+    const support = await getBrowserMessagingSupport()
+    if (!support.supported) {
+      console.error(
+        'Firebase Messaging unsupported:',
+        support.failedChecks,
+        support.checks
+      )
+      return
+    }
+
+    if (Notification.permission !== 'granted') {
+      return
+    }
+
+    await registerBrowserMessaging(async (installationId) => {
+      await call('kratium.api.register_device', {
+        token: installationId,
+        platform: 'webapp',
+      })
+      localStorage.setItem('kratium_fcm_token', installationId)
+      console.log('Browser notifications registered')
     })
-
-    if (!token) return
-
-
-    await call('kratium.api.register_device', {
-      token,
-      platform: 'webapp',
-    })
-
-    console.log('FCM setup complete:', token)
   } catch (err) {
     console.error('FCM registration failed:', err)
   }

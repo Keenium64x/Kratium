@@ -156,6 +156,24 @@ kratium.tasks.reminders.dispatch_reminders
 
 It runs with cron `* * * * *`. A reminder can therefore fire up to roughly one minute after `run_at`.
 
+For accurate second-level delivery, Bench also runs:
+
+```text
+precision_schedule: bench precision-scheduler
+```
+
+This moves RQ delayed jobs into the normal worker queue once per second. The
+minute dispatcher remains enabled as recovery if Redis or the precision
+scheduler was unavailable when a reminder was created.
+
+Creating a reminder also checks this scheduler and starts it automatically when
+the process is absent. The minute dispatcher no longer sends a backlog in a
+burst: reminders more than 30 seconds late are marked `Missed`; recurring
+reminders advance to their next occurrence.
+
+The scheduled job is released at the requested second. Firebase and the
+device's operating system can still add network delivery latency after release.
+
 Useful checks:
 
 ```bash
@@ -164,6 +182,21 @@ bench --site kratium.localhost scheduler resume
 bench --site kratium.localhost enable-scheduler
 bench --site kratium.localhost execute kratium.tasks.reminders.dispatch_reminders
 ```
+
+Reminder documents are visible in Frappe Desk:
+
+```text
+/app/reminder-master
+```
+
+An individual reminder such as `REM-2026-00004` is available at:
+
+```text
+/app/reminder-master/REM-2026-00004
+```
+
+The `Last Delivery Result` field shows the success or failure for every
+registered device.
 
 Delivery uses these states:
 

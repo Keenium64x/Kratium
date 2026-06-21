@@ -1,6 +1,11 @@
 from frappe.tests import IntegrationTestCase
 
-from kratium.notifications import Notification, build_multicast_message, normalize_data
+from kratium.notifications import (
+	Notification,
+	_is_invalid_token,
+	build_multicast_message,
+	normalize_data,
+)
 
 
 class TestNotificationPayload(IntegrationTestCase):
@@ -57,3 +62,6 @@ class TestNotificationPayload(IntegrationTestCase):
 		self.assertIsNone(message.notification)
 		self.assertEqual(message.data["title"], "Desktop reminder")
 		self.assertEqual(message.data["body"], "Visible description")
+
+	def test_firebase_device_unregistered_response_disables_token(self):
+		self.assertTrue(_is_invalid_token("not_found", "Device unregistered."))

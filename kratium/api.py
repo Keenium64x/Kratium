@@ -41,7 +41,7 @@ def revoke_mobile_token(token_hash: str):
 
 @frappe.whitelist(allow_guest=True)
 @jwt_required
-def register_device(token, platform):
+def register_device(token, platform, refreshed=False):
     user = getattr(frappe.local, "jwt_user", None)
     if not user or user == "Guest":
         frappe.throw("Not authenticated")
@@ -61,13 +61,17 @@ def register_device(token, platform):
     device_type = platform_map.get(str(platform or "").lower())
     if not device_type:
         frappe.throw("Unsupported platform")
-
-    existing = frappe.db.get_value("FCM Device", {"token": token}, "name")
+    existing = frappe.db.get_value(
+        "FCM Device",
+        {"token": token},
+        ["name", "enabled"],
+        as_dict=True,
+    )
 
     if existing:
         frappe.db.set_value(
             "FCM Device",
-            existing,
+            existing.name,
             {
                 "user": user,
                 "device_type": device_type,
@@ -75,7 +79,11 @@ def register_device(token, platform):
                 "last_seen": now_datetime(),
             },
         )
-        return existing
+        return {
+            "device": existing.name,
+            "registered": True,
+            "created": False,
+        }
 
     doc = frappe.get_doc({
         "doctype": "FCM Device",
@@ -86,7 +94,11 @@ def register_device(token, platform):
         "last_seen": now_datetime(),
     })
     doc.insert(ignore_permissions=True)
-    return doc.name
+    return {
+        "device": doc.name,
+        "registered": True,
+        "created": True,
+    }
 
 
 @frappe.whitelist(allow_guest=True)

@@ -32,7 +32,8 @@ export default defineConfig({
 		},
 	},
 	optimizeDeps: {
-		include: ["feather-icons", "showdown", "highlight.js/lib/core", "interactjs"],
+		include: ["feather-icons", "highlight.js/lib/core", "interactjs"],
+		exclude: ["frappe-ui"],
 	},
 	server: {
 		allowedHosts: true,

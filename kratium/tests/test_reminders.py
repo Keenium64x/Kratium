@@ -55,12 +55,13 @@ class TestReminderScheduling(IntegrationTestCase):
 		)
 		frappe.db.set_value("Reminder Master", name, "status", "Processing")
 
-		result = deliver_reminder(name)
+		result = deliver_reminder(name, claimed=True)
 		doc = frappe.get_doc("Reminder Master", name)
 
 		self.assertEqual(result["status"], "Fired")
 		self.assertEqual(doc.status, "Fired")
 		self.assertIsNotNone(doc.fired_at)
+		self.assertIn('"success": 1', doc.delivery_result)
 		send.assert_called_once()
 
 	@patch("kratium.tasks.reminders.send_notification")
@@ -82,7 +83,7 @@ class TestReminderScheduling(IntegrationTestCase):
 		)
 		frappe.db.set_value("Reminder Master", name, "status", "Processing")
 
-		deliver_reminder(name)
+		deliver_reminder(name, claimed=True)
 		doc = frappe.get_doc("Reminder Master", name)
 
 		self.assertEqual(doc.status, "Pending")
@@ -99,7 +100,7 @@ class TestReminderScheduling(IntegrationTestCase):
 		)
 		frappe.db.set_value("Reminder Master", name, "status", "Processing")
 
-		deliver_reminder(name)
+		deliver_reminder(name, claimed=True)
 		doc = frappe.get_doc("Reminder Master", name)
 
 		self.assertEqual(doc.status, "Pending")
@@ -107,20 +108,40 @@ class TestReminderScheduling(IntegrationTestCase):
 		self.assertIn("temporary Firebase problem", doc.last_error)
 		self.assertGreater(doc.remind_at, now_datetime())
 
-	@patch("kratium.tasks.reminders.frappe.enqueue")
-	def test_dispatcher_claims_due_reminder_before_queueing(self, enqueue):
+	@patch("kratium.tasks.reminders.ensure_precision_scheduler")
+	@patch("kratium.tasks.reminders.schedule_precise_delivery")
+	def test_dispatcher_requeues_slightly_late_reminder(self, schedule, ensure):
 		name = schedule_reminder(
 			"Administrator",
 			"Codex test dispatcher",
-			"Claim exactly once",
-			now_datetime() - timedelta(minutes=1),
+			"Recover without duplicate delivery",
+			now_datetime() - timedelta(seconds=5),
 		)
 
 		result = dispatch_reminders()
 		doc = frappe.get_doc("Reminder Master", name)
 
-		self.assertGreaterEqual(result["queued"], 1)
-		self.assertEqual(doc.status, "Processing")
+		self.assertGreaterEqual(result["requeued"], 1)
+		self.assertEqual(doc.status, "Pending")
+		ensure.assert_called_once()
 		self.assertTrue(
-			any(call.kwargs.get("reminder_name") == name for call in enqueue.call_args_list)
+			any(call.args[0] == name for call in schedule.call_args_list)
 		)
+
+	@patch("kratium.tasks.reminders.ensure_precision_scheduler")
+	@patch("kratium.tasks.reminders.schedule_precise_delivery")
+	def test_dispatcher_marks_stale_one_shot_as_missed(self, schedule, ensure):
+		name = schedule_reminder(
+			"Administrator",
+			"Codex test stale",
+			"Do not fire a notification burst",
+			now_datetime() - timedelta(minutes=2),
+		)
+
+		result = dispatch_reminders()
+		doc = frappe.get_doc("Reminder Master", name)
+
+		self.assertGreaterEqual(result["missed"], 1)
+		self.assertEqual(doc.status, "Missed")
+		self.assertIn("late", doc.last_error)
+		self.assertFalse(any(call.args[0] == name for call in schedule.call_args_list))

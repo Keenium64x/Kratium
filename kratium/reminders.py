@@ -9,6 +9,10 @@ import frappe
 from frappe.utils import get_datetime, now_datetime
 
 from kratium.notifications import normalize_data
+from kratium.precision_scheduler import (
+	cancel_precise_delivery_after_commit,
+	queue_precise_delivery_after_commit,
+)
 
 
 VALID_REMINDER_TYPES = {
@@ -65,6 +69,7 @@ def schedule_reminder(
 		}
 	)
 	doc.insert(ignore_permissions=True)
+	queue_precise_delivery_after_commit(doc.name, run_at, user)
 	return doc.name
 
 
@@ -95,7 +100,9 @@ def reschedule_reminder(reminder_name: str, run_at: Any) -> str:
 	doc.attempt_count = 0
 	doc.last_error = None
 	doc.fired_at = None
+	doc.delivery_result = None
 	doc.save(ignore_permissions=True)
+	queue_precise_delivery_after_commit(doc.name, doc.remind_at, doc.recipient or doc.owner)
 	return doc.name
 
 
@@ -103,6 +110,7 @@ def cancel_reminder(reminder_name: str) -> str:
 	doc = frappe.get_doc("Reminder Master", reminder_name)
 	doc.status = "Cancelled"
 	doc.save(ignore_permissions=True)
+	cancel_precise_delivery_after_commit(doc.name)
 	return doc.name
 
 
@@ -118,6 +126,7 @@ def sync_action_reminder(action: Any) -> str | None:
 	if not action.reminder or action.status == "Completed":
 		if latest and latest.status in {"Pending", "Processing"}:
 			frappe.db.set_value("Reminder Master", latest.name, "status", "Cancelled")
+			cancel_precise_delivery_after_commit(latest.name)
 		return None
 
 	reminder_type = action.reminder_type or "Once"
@@ -143,11 +152,17 @@ def sync_action_reminder(action: Any) -> str | None:
 		"status": "Pending",
 		"attempt_count": 0,
 		"last_error": None,
+		"delivery_result": None,
 	}
 
 	if latest and latest.status in {"Pending", "Processing"}:
 		if latest.status == "Pending":
 			frappe.db.set_value("Reminder Master", latest.name, values)
+			queue_precise_delivery_after_commit(
+				latest.name,
+				values["remind_at"],
+				values["recipient"],
+			)
 		return latest.name
 
 	if (

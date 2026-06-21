@@ -16,6 +16,7 @@ INVALID_TOKEN_CODES = {
 	"invalid-argument",
 	"messaging/invalid-registration-token",
 	"messaging/registration-token-not-registered",
+	"not_found",
 	"registration-token-not-registered",
 	"unregistered",
 }
@@ -154,6 +155,7 @@ def send_notification(
 			"failure": 0,
 			"disabled_tokens": 0,
 			"errors": [],
+			"deliveries": [],
 		}
 		if raise_on_total_failure:
 			raise NotificationDeliveryError(f"No enabled devices for {notification.user}")
@@ -167,6 +169,7 @@ def send_notification(
 		"failure": 0,
 		"disabled_tokens": 0,
 		"errors": [],
+		"deliveries": [],
 	}
 
 	web_devices = [device for device in devices if device.device_type in WEB_DEVICE_TYPES]
@@ -209,21 +212,30 @@ def _send_batch(
 	result["failure"] += response.failure_count
 
 	for index, send_response in enumerate(response.responses):
+		device = devices[index]
 		if send_response.success:
+			result["deliveries"].append(
+				{
+					"device": device.name,
+					"device_type": device.device_type,
+					"success": True,
+				}
+			)
 			continue
 
-		device = devices[index]
 		code = _error_code(send_response.exception)
-		result["errors"].append(
-			{
-				"device": device.name,
-				"device_type": device.device_type,
-				"code": code,
-				"error": str(send_response.exception),
-			}
-		)
+		error_text = str(send_response.exception)
+		delivery = {
+			"device": device.name,
+			"device_type": device.device_type,
+			"success": False,
+			"code": code,
+			"error": error_text,
+		}
+		result["deliveries"].append(delivery)
+		result["errors"].append(delivery)
 
-		if _is_invalid_token(code):
+		if _is_invalid_token(code, error_text):
 			frappe.db.set_value("FCM Device", device.name, "enabled", 0, update_modified=False)
 			result["disabled_tokens"] += 1
 
@@ -234,8 +246,14 @@ def _error_code(error: Exception | None) -> str:
 	return str(getattr(error, "code", "") or getattr(error, "status", "") or "unknown").lower()
 
 
-def _is_invalid_token(code: str) -> bool:
-	return code in INVALID_TOKEN_CODES or any(value in code for value in INVALID_TOKEN_CODES)
+def _is_invalid_token(code: str, error_text: str = "") -> bool:
+	error_text = error_text.lower()
+	return (
+		code in INVALID_TOKEN_CODES
+		or any(value in code for value in INVALID_TOKEN_CODES)
+		or "device unregistered" in error_text
+		or "registration token is not registered" in error_text
+	)
 
 
 def enqueue_notification(

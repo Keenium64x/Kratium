@@ -21,6 +21,7 @@
   "attempt_count",
   "last_error",
   "fired_at",
+  "delivery_result",
   "amended_from"
  ],
  "fields": [
@@ -66,7 +67,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Pending\nProcessing\nFired\nFailed\nCancelled"
+   "options": "Pending\nProcessing\nFired\nFailed\nMissed\nCancelled"
   },
   {
    "fieldname": "reminder_type",
@@ -124,6 +125,12 @@
    "fieldname": "fired_at",
    "fieldtype": "Datetime",
    "label": "Last Fired At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "delivery_result",
+   "fieldtype": "Long Text",
+   "label": "Last Delivery Result",
    "read_only": 1
   }
  ],
