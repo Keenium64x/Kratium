@@ -309,11 +309,26 @@ class ClarificationResult(Schema):
 
 class RouteOption(Schema):
 	route_id: str
+	outcome_type: Literal[
+		"create",
+		"update",
+		"delete",
+		"reschedule",
+		"classify",
+		"read",
+		"plan",
+		"monitor",
+		"ask_user",
+	]
 	description: str
 	expected_outcome: str
+	system_objects: list[str] = Field(default_factory=list)
 	evidence: list[Evidence] = Field(min_length=1)
+	missing_information: list[str] = Field(default_factory=list)
+	reversibility: Literal["high", "medium", "low"] = "medium"
 	risks: list[str] = Field(default_factory=list)
 	confidence: float = Field(ge=0, le=1)
+	score: float = Field(ge=0, le=1)
 
 
 class Decision(Schema):
@@ -567,6 +582,7 @@ If it returns UserClarification, return that exact schema.
 If it returns ClarificationResult, continue to route selection.
 
 At route_selection, call select_route when it is available.
+If select_route returns UserClarification, return that exact schema.
 At implementation, call design_implementation when it is available.
 At review or monitoring, call review_outcome when it is available.
 
@@ -625,14 +641,39 @@ Select the most sensible route for achieving the clarified goal.
 Use the clarification, collected information, system context, and current orchestration state.
 Do not design atomic actions. Do not execute anything. Do not ask permission questions.
 
-Call collect_information when a route decision depends on current Kratium records, relationships,
-calendar state, categories, schedules, or other system facts that are not already available.
+Route generation and selection are one stage for now. You must still do both parts explicitly:
 
-Consider practical alternatives when they could materially change the implementation. Choose the
-route that best satisfies the user's intended outcome with the lowest avoidable risk.
+1. Identify the outcome type: create, update, delete, reschedule, classify, read, plan, monitor,
+or ask_user.
+2. Generate candidate routes that are possible in the real Kratium system.
+3. Call collect_information when a route decision depends on current Kratium records,
+relationships, calendar state, categories, schedules, or other system facts that are not already
+available.
+4. Score each route from 0 to 1 using fit to goal, evidence, reversibility, risk, missing
+information, and support from known Kratium objects.
+5. Choose the highest-scoring safe route, or choose an ask_user route if meaning is still too
+unclear for a safe implementation route.
 
-Return the routes considered, the chosen route id, route-level decisions, supporting evidence,
-risks, and confidence. Every chosen_route_id must match one returned route_id.
+If you choose ask_user, make it a real route option. Its missing_information must name the exact
+route-selection facts or decisions that block progress. Its evidence should explain why the system
+cannot safely infer them. Do not invent an implementation route just to avoid asking the user.
+
+Known Kratium system objects and route patterns:
+- Calendar events are Action records where event is enabled.
+- Todos and scheduled work are also Action records.
+- Actions can be hierarchical through parent_action and ancestor.
+- Action Category can classify or group actions.
+- Action Time Entry records execution/time tracking.
+- Reminder Master records reminder behavior.
+- Planning objects include Fact, Meal, Meal Plan, Grocery, Grocery Bin, Grocery Item, Grocery Stock
+Entry, Grocery Stock Ledger Entry, Storage Location, UOM Conversion, and Unit of Measure.
+
+For each candidate route, include outcome_type, system_objects, evidence, missing information,
+risks, reversibility, confidence, and score. Consider practical alternatives when they could
+materially change implementation. Every chosen_route_id must match one returned route_id.
+
+The selected route should decide only the path. Atomic create/update/delete details belong to
+design_implementation.
 """
 
 _orchestrator_agents = {}
@@ -729,6 +770,15 @@ def get_route_selection_agent():
 				raise ModelRetry("route_id values must be unique")
 			if not output.decisions:
 				raise ModelRetry("Route selection must include at least one decision")
+			chosen_route = next(route for route in output.routes if route.route_id == output.chosen_route_id)
+			if chosen_route.outcome_type == "ask_user":
+				if not chosen_route.missing_information and not chosen_route.risks:
+					raise ModelRetry("ask_user routes must explain what information blocks route selection")
+				return output
+			if chosen_route.outcome_type != "ask_user" and chosen_route.confidence < 0.65:
+				raise ModelRetry("Low-confidence implementation routes should become an ask_user route")
+			if chosen_route.outcome_type != "ask_user" and not chosen_route.system_objects:
+				raise ModelRetry("Implementation routes must name the Kratium system objects they use")
 			return output
 
 	return _route_selection_agent
@@ -758,6 +808,8 @@ def get_orchestrator_agent(information_only=False):
 					raise ModelRetry("Return the exact UserClarification produced by clarify_request")
 
 			if isinstance(output, InformationAnswer):
+				if state.stage not in {"clarification", "waiting_for_user"} and not information_only:
+					raise ModelRetry("Do not return InformationAnswer during action routing; continue the current stage")
 				if not state.information:
 					raise ModelRetry("Call collect_information before returning InformationAnswer")
 				output = InformationAnswer(results=state.information)
@@ -892,6 +944,26 @@ def preview_route_selection(final_input, goal=None):
 	return summarize_orchestration_result(run_orchestrator(state))
 
 
+def route_selection_to_user_clarification(route_selection):
+	chosen_route = next(
+		route for route in route_selection.routes if route.route_id == route_selection.chosen_route_id
+	)
+	missing_information = chosen_route.missing_information or chosen_route.risks
+	question = "What should I know before choosing the implementation route?"
+	if missing_information:
+		question = "Please clarify: " + "; ".join(missing_information)
+
+	return UserClarification(
+		questions=[
+			UserQuestion(
+				question=question,
+				reason="Route selection found missing information that changes the safest implementation path.",
+			)
+		],
+		blocked_decisions=[decision.conclusion for decision in route_selection.decisions],
+	)
+
+
 def summarize_orchestration_result(result):
 	result = OrchestrationRunResult.model_validate(result)
 	output = result.output
@@ -930,11 +1002,27 @@ def summarize_orchestration_result(result):
 		summary["chosen_route_id"] = output.chosen_route_id
 
 	if result.state.route_selection:
+		chosen_route = next(
+			(
+				route
+				for route in result.state.route_selection.routes
+				if route.route_id == result.state.route_selection.chosen_route_id
+			),
+			None,
+		)
 		summary["route_selection"] = {
 			"chosen_route_id": result.state.route_selection.chosen_route_id,
 			"routes_considered": len(result.state.route_selection.routes),
 			"decisions": len(result.state.route_selection.decisions),
 		}
+		if chosen_route:
+			summary["route_selection"].update({
+				"outcome_type": chosen_route.outcome_type,
+				"score": chosen_route.score,
+				"confidence": chosen_route.confidence,
+				"system_objects": chosen_route.system_objects,
+				"risks": chosen_route.risks,
+			})
 	if result.state.information:
 		summary["information_requests"] = len(result.state.information)
 
@@ -1119,7 +1207,7 @@ async def collect_information(
 
 
 async def select_route(ctx: RunContext[OrchestrationState]):
-	"""Choose the route that should be designed into atomic actions."""
+	"""Choose the route, or return the route question that blocks safe selection."""
 	state = ctx.deps
 	if state.stage != "route_selection":
 		raise ModelRetry("select_route is only available during route_selection")
@@ -1140,6 +1228,14 @@ async def select_route(ctx: RunContext[OrchestrationState]):
 		usage_limits=USAGE_LIMITS,
 	)
 	state.route_selection = result.output
+	chosen_route = next(
+		route for route in result.output.routes if route.route_id == result.output.chosen_route_id
+	)
+	if chosen_route.outcome_type == "ask_user":
+		state.user_clarification = route_selection_to_user_clarification(result.output)
+		state.stage = "waiting_for_user"
+		return state.user_clarification
+
 	state.stage = "implementation"
 	return result.output
 
