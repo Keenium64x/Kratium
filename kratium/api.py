@@ -1,6 +1,7 @@
 import frappe
 from frappe.utils import now_datetime
 from kratium.auth_guard import jwt_required
+from kratium.firebase.fcm import get_firebase_service_account_path
 from kratium.notifications import Notification, enqueue_notification, send_notification as deliver_notification
 from kratium.reminders import (
 	cancel_reminder as cancel_scheduled_reminder,
@@ -99,6 +100,47 @@ def register_device(token, platform, refreshed=False):
         "registered": True,
         "created": True,
     }
+
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def mobile_sync_status():
+    user = getattr(frappe.local, "jwt_user", None) or frappe.session.user
+    if not user or user == "Guest":
+        frappe.throw("Not authenticated", frappe.PermissionError)
+
+    devices = frappe.get_all(
+        "FCM Device",
+        filters={"user": user},
+        fields=["name", "device_type", "enabled", "last_seen"],
+        order_by="modified desc",
+    )
+
+    return {
+        "ok": True,
+        "user": user,
+        "devices": devices,
+        "firebase_configured": bool(get_firebase_service_account_path()),
+        "server_time": now_datetime(),
+    }
+
+
+@frappe.whitelist(allow_guest=True)
+@jwt_required
+def send_test_notification(title="Kratium Sync Test", body="Mobile notifications are connected"):
+    user = _resolve_notification_user()
+    result = deliver_notification(
+        Notification(
+            user=user,
+            title=title,
+            body=body,
+            data={"source": "mobile_sync_test"},
+            route="/kratium/home",
+            event_type="sync_test",
+        ),
+        raise_on_total_failure=False,
+    )
+    return {"sent": result.get("success", 0) > 0, "user": user, "result": result}
 
 
 @frappe.whitelist(allow_guest=True)

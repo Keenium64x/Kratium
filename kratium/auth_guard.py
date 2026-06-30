@@ -3,9 +3,15 @@ import jwt
 import hashlib
 from functools import wraps
 
-JWT_SECRET = frappe.conf.get("jwt_secret")
 JWT_ALGO = "HS256"
 JWT_HEADER = "X-Mobile-Token"
+
+
+def get_jwt_secret():
+    secret = frappe.conf.get("jwt_secret")
+    if not secret:
+        frappe.throw("jwt_secret is not configured", frappe.PermissionError)
+    return secret
 
 
 def jwt_required(fn):
@@ -26,7 +32,7 @@ def jwt_required(fn):
         try:
             payload = jwt.decode(
                 token,
-                JWT_SECRET,
+                get_jwt_secret(),
                 algorithms=[JWT_ALGO],
                 options={"require": ["exp", "sub"]},
             )

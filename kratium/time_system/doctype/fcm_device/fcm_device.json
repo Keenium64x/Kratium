@@ -28,7 +28,7 @@
    "fieldname": "device_type",
    "fieldtype": "Select",
    "label": "Device Type",
-   "options": "web\nandroid\nios"
+   "options": "web\nwebapp\nandroid\nios\nmacos\nwindows\nlinux"
   },
   {
    "fieldname": "last_seen",

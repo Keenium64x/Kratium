@@ -3,7 +3,7 @@ import ipaddress
 import json
 import os
 import socket
-from datetime import datetime
+from datetime import datetime, timedelta, time
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urljoin, urlsplit
@@ -37,6 +37,9 @@ CHEAP_MODEL = "gemini-3.1-flash-lite"
 STRONG_MODEL = "gemini-3.1-pro-preview"
 APP_DIRECTORY = Path(__file__).resolve().parent.parent
 LOGFIRE_DIRECTORY = APP_DIRECTORY / ".logfire"
+
+LOGFIRE_SEND = os.getenv("KRATIUM_AI_LOGFIRE_SEND", "1") == "1"
+LOGFIRE_CONSOLE_VERBOSE = os.getenv("KRATIUM_AI_LOGFIRE_VERBOSE", "0") == "1"
 
 MODEL_SETTINGS = GeminiModelSettings(
 	temperature=0,
@@ -82,7 +85,8 @@ SYSTEM_CONTEXT = {
 	),
 	"actions": (
 		"Actions form a hierarchy through parent_action and ancestor. "
-		"Actions may also represent todos, events, routines, goals, groups, and milestones."
+		"Actions may also represent todos, events, routines, goals, groups, and milestones. "
+		"Calendar questions should be answered from Action records where event is enabled."
 	),
 	"permissions": (
 		"Clarification resolves meaning and implementation scope. "
@@ -98,7 +102,7 @@ SYSTEM_CONTEXT = {
 
 def setup_logfire():
 	logfire.configure(
-		send_to_logfire=True,
+		send_to_logfire=LOGFIRE_SEND,
 		service_name="kratium-ai",
 		environment=os.getenv("LOGFIRE_ENVIRONMENT", "development"),
 		config_dir=APP_DIRECTORY,
@@ -107,8 +111,8 @@ def setup_logfire():
 			span_style="indented",
 			include_timestamps=True,
 			include_tags=True,
-			verbose=True,
-			min_log_level="debug",
+			verbose=LOGFIRE_CONSOLE_VERBOSE,
+			min_log_level="debug" if LOGFIRE_CONSOLE_VERBOSE else "warning",
 			show_project_link=False,
 		),
 	)
@@ -219,9 +223,44 @@ class DoctypeDescription(Schema):
 
 class SystemRecordResult(Schema):
 	doctype: str
-	filters: dict[str, Any] = Field(default_factory=dict)
+	filters: Any = Field(default_factory=dict)
 	records: list[dict[str, Any]]
 	count: int
+	limit: int | None = None
+	offset: int | None = None
+	has_more: bool = False
+	note: str | None = None
+
+
+class DateRangeResult(Schema):
+	label: str
+	start: datetime
+	end: datetime
+	timezone: str | None = None
+
+
+class LinkField(Schema):
+	fieldname: str
+	label: str | None = None
+	fieldtype: str
+	options: str
+	direction: Literal["outgoing", "incoming"]
+	doctypes: list[str] = Field(default_factory=list)
+
+
+class RelationshipMap(Schema):
+	doctype: str
+	outgoing_links: list[LinkField]
+	incoming_links: list[LinkField]
+
+
+class ActionLookupResult(Schema):
+	filters: Any = Field(default_factory=dict)
+	records: list[dict[str, Any]]
+	count: int
+	limit: int
+	has_more: bool = False
+	note: str | None = None
 
 
 class WebSource(Schema):
@@ -532,6 +571,7 @@ At implementation, call design_implementation when it is available.
 At review or monitoring, call review_outcome when it is available.
 
 If the required specialist tool is not available, return OrchestrationPaused.
+When state.stage is implementation and design_implementation is unavailable, return OrchestrationPaused.
 Only return ExecutionPlan after clarification, route selection, and action design exist in state.
 """
 
@@ -571,14 +611,34 @@ Do not guess DocType fields or record identifiers. Discover the available DocTyp
 needed. Prefer focused queries, but widen or follow parent records when the first result is
 insufficient. Distinguish facts returned by tools from your own inference.
 
+For Action, calendar, hierarchy, category, or date-range questions, prefer the dedicated Action
+and date helper tools before falling back to generic record queries.
+
 Return answer in the exact form described by desired_output. Include the investigation strategy,
 the evidence supporting the answer, anything still missing, and a calibrated confidence score.
 Use the exact request_id and desired_output supplied in the request.
 """
 
+ROUTE_SELECTION_INSTRUCTIONS = """
+Select the most sensible route for achieving the clarified goal.
+
+Use the clarification, collected information, system context, and current orchestration state.
+Do not design atomic actions. Do not execute anything. Do not ask permission questions.
+
+Call collect_information when a route decision depends on current Kratium records, relationships,
+calendar state, categories, schedules, or other system facts that are not already available.
+
+Consider practical alternatives when they could materially change the implementation. Choose the
+route that best satisfies the user's intended outcome with the lowest avoidable risk.
+
+Return the routes considered, the chosen route id, route-level decisions, supporting evidence,
+risks, and confidence. Every chosen_route_id must match one returned route_id.
+"""
+
 _orchestrator_agents = {}
 _clarification_agent = None
 _information_agents = {}
+_route_selection_agent = None
 
 
 def get_clarification_agent():
@@ -603,6 +663,10 @@ def get_information_agent(source_scope="system"):
 			get_current_user,
 			list_system_doctypes,
 			describe_doctype,
+			discover_doctype_relationships,
+			resolve_date_range,
+			query_actions,
+			get_action_context,
 			query_system_records,
 			search_system_records,
 			get_system_record,
@@ -643,11 +707,38 @@ def get_information_agent(source_scope="system"):
 	return _information_agents[source_scope]
 
 
+def get_route_selection_agent():
+	global _route_selection_agent
+
+	if _route_selection_agent is None:
+		_route_selection_agent = create_ai_agent(
+			RouteSelection,
+			ROUTE_SELECTION_INSTRUCTIONS,
+			deps_type=OrchestrationState,
+			tools=[collect_information],
+			name="route_selection_agent",
+			retries=2,
+		)
+
+		@_route_selection_agent.output_validator
+		def validate_route_selection(ctx, output):
+			route_ids = [route.route_id for route in output.routes]
+			if output.chosen_route_id not in route_ids:
+				raise ModelRetry("chosen_route_id must match one returned route_id")
+			if len(route_ids) != len(set(route_ids)):
+				raise ModelRetry("route_id values must be unique")
+			if not output.decisions:
+				raise ModelRetry("Route selection must include at least one decision")
+			return output
+
+	return _route_selection_agent
+
+
 def get_orchestrator_agent(information_only=False):
 	if information_only not in _orchestrator_agents:
 		tools = [Tool(collect_information, sequential=True)]
 		if not information_only:
-			tools.insert(0, clarify_request)
+			tools = [clarify_request, select_route, *tools]
 
 		agent = create_ai_agent(
 			OrchestrationOutput,
@@ -682,6 +773,10 @@ def get_orchestrator_agent(information_only=False):
 				required_tool = required_tools.get(state.stage)
 				if output.stage != state.stage or output.required_tool != required_tool:
 					raise ModelRetry("Pause at the current stage and name its required specialist tool")
+
+			if isinstance(output, RouteSelection):
+				if state.stage != "implementation" or output != state.route_selection:
+					raise ModelRetry("Return the exact RouteSelection produced by select_route")
 
 			if isinstance(output, ExecutionPlan):
 				if not state.clarification or not state.route_selection or not state.action_design:
@@ -777,6 +872,73 @@ def run_orchestrator(state, new_information=None):
 	state.conversation_id = result.conversation_id
 
 	return OrchestrationRunResult(output=result.output, state=state)
+
+
+def preview_orchestration(final_input):
+	return summarize_orchestration_result(start_orchestration(final_input))
+
+
+def preview_route_selection(final_input, goal=None):
+	state = OrchestrationState(
+		orchestration_id=str(uuid4()),
+		stage="route_selection",
+		input=OrchestrationInput(input=final_input, source="direct"),
+		clarification=ClarificationResult(
+			problem=ProblemBreakdown(goal=goal or final_input),
+			evidence=[Evidence(source="input", reference="direct input", fact=final_input)],
+			confidence=0.9,
+		),
+	)
+	return summarize_orchestration_result(run_orchestrator(state))
+
+
+def summarize_orchestration_result(result):
+	result = OrchestrationRunResult.model_validate(result)
+	output = result.output
+	summary = {
+		"stage": result.state.stage,
+		"status": output.status,
+		"orchestration_id": result.state.orchestration_id,
+		"conversation_id": result.state.conversation_id,
+	}
+
+	if isinstance(output, InformationAnswer):
+		summary["results"] = [
+			{
+				"status": item.status,
+				"answer": item.answer,
+				"confidence": item.confidence,
+				"strategy": item.strategy,
+				"facts": [fact.model_dump() for fact in item.facts],
+				"missing_information": item.missing_information,
+			}
+			for item in output.results
+		]
+	elif isinstance(output, UserClarification):
+		summary["questions"] = [question.model_dump() for question in output.questions]
+		summary["blocked_decisions"] = output.blocked_decisions
+	elif isinstance(output, RouteSelection):
+		summary["chosen_route_id"] = output.chosen_route_id
+		summary["routes"] = [route.model_dump() for route in output.routes]
+		summary["decisions"] = [decision.model_dump() for decision in output.decisions]
+	elif isinstance(output, OrchestrationPaused):
+		summary["required_tool"] = output.required_tool
+		summary["reason"] = output.reason
+	elif isinstance(output, ExecutionPlan):
+		summary["plan_id"] = output.plan_id
+		summary["action_count"] = len(output.actions)
+		summary["chosen_route_id"] = output.chosen_route_id
+
+	if result.state.route_selection:
+		summary["route_selection"] = {
+			"chosen_route_id": result.state.route_selection.chosen_route_id,
+			"routes_considered": len(result.state.route_selection.routes),
+			"decisions": len(result.state.route_selection.decisions),
+		}
+	if result.state.information:
+		summary["information_requests"] = len(result.state.information)
+
+	return summary
 
 
 def resume_orchestration(state, new_information):
@@ -931,6 +1093,10 @@ async def collect_information(
 					"get_current_user",
 					"list_system_doctypes",
 					"describe_doctype",
+					"discover_doctype_relationships",
+					"resolve_date_range",
+					"query_actions",
+					"get_action_context",
 					"query_system_records",
 					"search_system_records",
 					"get_system_record",
@@ -952,9 +1118,30 @@ async def collect_information(
 	return result.output
 
 
-def select_route(state):
-	# Returns the considered routes and selected route.
-	pass
+async def select_route(ctx: RunContext[OrchestrationState]):
+	"""Choose the route that should be designed into atomic actions."""
+	state = ctx.deps
+	if state.stage != "route_selection":
+		raise ModelRetry("select_route is only available during route_selection")
+	if not state.clarification:
+		raise ModelRetry("Clarification must finish before route selection")
+
+	prompt = (
+		f"Original input:\n{state.input.model_dump_json()}"
+		f"\n\nClarification:\n{state.clarification.model_dump_json()}"
+		f"\n\nSystem context:\n{to_jsonable_python(SYSTEM_CONTEXT)}"
+		f"\n\nInformation already collected:\n{to_jsonable_python(state.information)}"
+		f"\n\nCurrent orchestration update:\n{ctx.prompt}"
+	)
+	result = await get_route_selection_agent().run(
+		prompt,
+		deps=state,
+		usage=ctx.usage,
+		usage_limits=USAGE_LIMITS,
+	)
+	state.route_selection = result.output
+	state.stage = "implementation"
+	return result.output
 
 
 def design_implementation(state):
@@ -999,10 +1186,32 @@ def _validate_fields(meta, fields):
 	return selected_fields
 
 
+def _filter_fieldnames(filters):
+	if not filters:
+		return []
+
+	fieldnames = []
+	for item in filters:
+		if isinstance(filters, dict):
+			fieldnames.append(item)
+		elif isinstance(item, (list, tuple)):
+			if len(item) >= 4:
+				fieldnames.append(item[1])
+			elif item:
+				fieldnames.append(item[0])
+	return fieldnames
+
+
 def _validate_filters(meta, filters):
 	filters = filters or {}
-	_validate_fields(meta, list(filters))
+	_validate_fields(meta, _filter_fieldnames(filters))
 	return filters
+
+
+def _validate_or_filters(meta, or_filters):
+	or_filters = or_filters or []
+	_validate_fields(meta, _filter_fieldnames(or_filters))
+	return or_filters
 
 
 def _validate_order_by(meta, order_by):
@@ -1017,12 +1226,100 @@ def _validate_order_by(meta, order_by):
 
 
 def _system_source_allowed(ctx):
-	if ctx.deps.source_scope == "web":
+	deps = ctx.get("deps") if isinstance(ctx, dict) else ctx.deps
+	source_scope = deps.get("source_scope") if isinstance(deps, dict) else deps.source_scope
+	if source_scope == "web":
 		raise ModelRetry("This request only permits web sources")
 
 
 def _json_safe(value):
 	return json.loads(json.dumps(value, default=str))
+
+
+def _now():
+	return datetime.now().astimezone()
+
+
+def _day_bounds(value):
+	return (
+		datetime.combine(value.date(), time.min).astimezone(),
+		datetime.combine(value.date(), time.max).astimezone(),
+	)
+
+
+def _week_bounds(value):
+	start_date = (value - timedelta(days=value.weekday())).date()
+	end_date = start_date + timedelta(days=6)
+	return (
+		datetime.combine(start_date, time.min).astimezone(),
+		datetime.combine(end_date, time.max).astimezone(),
+	)
+
+
+def _month_bounds(value):
+	start_date = value.replace(day=1).date()
+	next_month = (value.replace(day=28) + timedelta(days=4)).replace(day=1)
+	end_date = (next_month - timedelta(days=1)).date()
+	return (
+		datetime.combine(start_date, time.min).astimezone(),
+		datetime.combine(end_date, time.max).astimezone(),
+	)
+
+
+def _action_summary_fields():
+	return [
+		"name",
+		"action_name",
+		"start_date",
+		"end_date",
+		"status",
+		"completed",
+		"event",
+		"todo",
+		"routine",
+		"is_group",
+		"parent_action",
+		"ancestor",
+		"category",
+		"modified",
+	]
+
+
+def _coerce_datetime(value):
+	if value is None or isinstance(value, datetime):
+		return value
+	if isinstance(value, str):
+		cleaned_value = value.replace("Z", "+00:00")
+		for parser in (
+			datetime.fromisoformat,
+			lambda text: datetime.strptime(text, "%Y-%m-%d %H:%M:%S"),
+			lambda text: datetime.strptime(text, "%Y-%m-%d %H:%M"),
+			lambda text: datetime.strptime(text, "%Y-%m-%d"),
+		):
+			try:
+				return parser(cleaned_value).astimezone()
+			except ValueError:
+				pass
+	raise ValueError(f"Unsupported datetime value: {value}")
+
+
+def _record_action_context(doc):
+	data = doc.as_dict()
+	record = {field: data.get(field) for field in _action_summary_fields()}
+	record["dependencies"] = [
+		{"dependant_on": row.dependant_on}
+		for row in data.get("dependancies", [])
+		if row.get("dependant_on")
+	]
+	record["constraints"] = [
+		{
+			"constrining_action": row.constrining_action,
+			"constraint": row.constraint,
+		}
+		for row in data.get("constraints", [])
+		if row.get("constrining_action") or row.get("constraint")
+	]
+	return record
 
 
 def get_current_user(ctx: RunContext[InformationRequest]):
@@ -1081,6 +1378,173 @@ def describe_doctype(ctx: RunContext[InformationRequest], doctype: str):
 	)
 
 
+def discover_doctype_relationships(ctx: RunContext[InformationRequest], doctype: str):
+	"""Return outgoing and incoming Link/Table relationships for a readable DocType."""
+	_system_source_allowed(ctx)
+	meta = _get_readable_meta(doctype)
+	outgoing_links = []
+	incoming_links = []
+
+	for field in meta.fields:
+		if field.fieldtype in {"Link", "Table"} and field.options:
+			outgoing_links.append(LinkField(
+				fieldname=field.fieldname,
+				label=field.label,
+				fieldtype=field.fieldtype,
+				options=field.options,
+				direction="outgoing",
+				doctypes=[field.options] if field.options in AI_READABLE_DOCTYPES else [],
+			))
+
+	for candidate in sorted(AI_READABLE_DOCTYPES):
+		candidate_meta = _get_readable_meta(candidate)
+		for field in candidate_meta.fields:
+			if field.fieldtype in {"Link", "Table"} and field.options == doctype:
+				incoming_links.append(LinkField(
+					fieldname=field.fieldname,
+					label=field.label,
+					fieldtype=field.fieldtype,
+					options=doctype,
+					direction="incoming",
+					doctypes=[candidate],
+				))
+
+	return RelationshipMap(
+		doctype=doctype,
+		outgoing_links=outgoing_links,
+		incoming_links=incoming_links,
+	)
+
+
+def resolve_date_range(
+	ctx: RunContext[InformationRequest],
+	period: Literal["today", "tomorrow", "yesterday", "this_week", "next_week", "this_month", "next_month"],
+):
+	"""Resolve common calendar phrases into exact datetime bounds."""
+	_system_source_allowed(ctx)
+	now = _now()
+	if period == "today":
+		start, end = _day_bounds(now)
+	elif period == "tomorrow":
+		start, end = _day_bounds(now + timedelta(days=1))
+	elif period == "yesterday":
+		start, end = _day_bounds(now - timedelta(days=1))
+	elif period == "this_week":
+		start, end = _week_bounds(now)
+	elif period == "next_week":
+		start, end = _week_bounds(now + timedelta(days=7))
+	elif period == "this_month":
+		start, end = _month_bounds(now)
+	else:
+		start, end = _month_bounds((now.replace(day=28) + timedelta(days=4)))
+
+	return DateRangeResult(
+		label=period,
+		start=start,
+		end=end,
+		timezone=now.tzname(),
+	)
+
+
+def query_actions(
+	ctx: RunContext[InformationRequest],
+	start: str | None = None,
+	end: str | None = None,
+	calendar_only: bool = False,
+	parent_action: str | None = None,
+	ancestor: str | None = None,
+	category: str | None = None,
+	status: Literal["Upcoming", "In Progress", "Completed"] | None = None,
+	completed: bool | None = None,
+	text: str | None = None,
+	limit: int = 50,
+):
+	"""Query Action records with common calendar, hierarchy, category, and lifecycle filters."""
+	import frappe
+
+	_system_source_allowed(ctx)
+	meta = _get_readable_meta("Action")
+	start = _coerce_datetime(start)
+	end = _coerce_datetime(end)
+	if start and end and end < start:
+		raise ValueError("end cannot be before start")
+
+	filters = []
+	if calendar_only:
+		filters.append(["Action", "event", "=", 1])
+	if parent_action:
+		filters.append(["Action", "parent_action", "=", parent_action])
+	if ancestor:
+		filters.append(["Action", "ancestor", "=", ancestor])
+	if category:
+		filters.append(["Action", "category", "=", category])
+	if status:
+		filters.append(["Action", "status", "=", status])
+	if completed is not None:
+		filters.append(["Action", "completed", "=", int(completed)])
+	if start and end:
+		filters.extend([
+			["Action", "start_date", "<=", end],
+			["Action", "end_date", ">=", start],
+		])
+	elif start:
+		filters.append(["Action", "start_date", ">=", start])
+	elif end:
+		filters.append(["Action", "end_date", "<=", end])
+
+	_validate_filters(meta, filters)
+	limit = max(1, min(limit, 100))
+	or_filters = None
+	if text:
+		or_filters = [
+			["Action", "action_name", "like", f"%{text}%"],
+			["Action", "description", "like", f"%{text}%"],
+		]
+		_validate_or_filters(meta, or_filters)
+
+	records = frappe.get_list(
+		"Action",
+		filters=filters,
+		or_filters=or_filters,
+		fields=_action_summary_fields(),
+		order_by="start_date asc",
+		limit_page_length=limit + 1,
+	)
+	visible_records = records[:limit]
+	return ActionLookupResult(
+		filters=_json_safe(filters),
+		records=_json_safe(visible_records),
+		count=len(visible_records),
+		limit=limit,
+		has_more=len(records) > limit,
+		note="Calendar records are Action records where event is enabled." if calendar_only else None,
+	)
+
+
+def get_action_context(ctx: RunContext[InformationRequest], action_id: str):
+	"""Return one Action plus direct hierarchy and dependency context."""
+	import frappe
+
+	_system_source_allowed(ctx)
+	_get_readable_meta("Action")
+	doc = frappe.get_doc("Action", action_id)
+	doc.check_permission("read")
+	children = frappe.get_list(
+		"Action",
+		filters={"parent_action": action_id},
+		fields=_action_summary_fields(),
+		order_by="start_date asc",
+		limit_page_length=50,
+	)
+	return {
+		"doctype": "Action",
+		"name": action_id,
+		"record": _json_safe(_record_action_context(doc)),
+		"children": _json_safe(children),
+		"child_count": len(children),
+	}
+
+
 def query_system_records(
 	ctx: RunContext[InformationRequest],
 	doctype: str,
@@ -1107,13 +1571,17 @@ def query_system_records(
 		fields=fields,
 		order_by=order_by,
 		limit_start=offset,
-		limit_page_length=limit,
+		limit_page_length=limit + 1,
 	)
+	visible_records = records[:limit]
 	return SystemRecordResult(
 		doctype=doctype,
-		filters=filters,
-		records=_json_safe(records),
-		count=len(records),
+		filters=_json_safe(filters),
+		records=_json_safe(visible_records),
+		count=len(visible_records),
+		limit=limit,
+		offset=offset,
+		has_more=len(records) > limit,
 	)
 
 
@@ -1150,13 +1618,16 @@ def search_system_records(
 			for fieldname in search_fields
 		],
 		fields=fields,
-		limit_page_length=limit,
+		limit_page_length=limit + 1,
 	)
+	visible_records = records[:limit]
 	return SystemRecordResult(
 		doctype=doctype,
-		filters=filters,
-		records=_json_safe(records),
-		count=len(records),
+		filters=_json_safe(filters),
+		records=_json_safe(visible_records),
+		count=len(visible_records),
+		limit=limit,
+		has_more=len(records) > limit,
 	)
 
 
@@ -1234,15 +1705,15 @@ async def search_web(ctx: RunContext[InformationRequest], query: str):
 		query=query,
 		status="complete",
 		answer="\n\n".join(
-			f"{result.get('title', 'Untitled')}: {result.get('body', '')}"
-			for result in results
+			f"{result.get('title', 'Untitled')}: {(result.get('body') or '')[:500]}"
+			for result in results[:5]
 		),
 		sources=[
 			WebSource(
 				title=result.get("title") or result["href"],
 				url=result["href"],
 			)
-			for result in results
+			for result in results[:5]
 			if result.get("href")
 		],
 	)
@@ -1284,7 +1755,7 @@ async def read_web_page(ctx: RunContext[InformationRequest], url: str):
 	return WebPageResult(
 		url=current_url,
 		title=title,
-		content=content[:30_000],
+		content=content[:12_000],
 	)
 
 

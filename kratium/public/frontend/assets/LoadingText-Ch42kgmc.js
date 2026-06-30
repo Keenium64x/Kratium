@@ -1,2 +1,0 @@
-import{ai as a,bo as o,o as n,a6 as s,y as c,ao as r,ab as i,aq as d}from"./index-BVLU-Veg.js";const _={name:"Loading",props:{text:{type:String,default:"Loading..."}},components:{LoadingIndicator:o}},p={class:"flex items-center text-base text-ink-gray-4"};function m(l,x,t,g,f,L){const e=d("LoadingIndicator");return n(),s("div",p,[c(e,{class:"-ml-1 mr-2 h-3 w-3"}),r(" "+i(t.text),1)])}const y=a(_,[["render",m]]);export{y as L};
-//# sourceMappingURL=LoadingText-Ch42kgmc.js.map

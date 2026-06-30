@@ -2,32 +2,28 @@ import frappe
 import jwt
 import hashlib
 from datetime import datetime, timedelta
-import requests
+from frappe.core.doctype.user.user import User
 
-JWT_SECRET = frappe.conf.get("jwt_secret")  # put in site_config.json
 JWT_ALGO = "HS256"
 JWT_EXP_DAYS = 3
 
+def get_jwt_secret():
+    secret = frappe.conf.get("jwt_secret")
+    if not secret:
+        frappe.throw("jwt_secret is not configured")
+    return secret
+
 def confirm_credentials(email, password):
-    base = "herta-diphyllous-nonsufferably.ngrok-free.dev" 
+    if not email or not password:
+        frappe.throw("Email and password are required")
 
-
-    url = f"http://{base}/api/method/login"
-
-    r = requests.post(
-        url,
-        data={
-            "usr": email,
-            "pwd": password,
-        },
-        headers={"Accept": "application/json"},
-        timeout=10,
-    )
-
-    if r.status_code != 200:
+    user = User.find_by_credentials(email, password)
+    if not user or not user.is_authenticated:
         frappe.throw("Invalid credentials")
+    if user.name != "Administrator" and not user.enabled:
+        frappe.throw("User disabled or missing")
 
-    return frappe.get_doc("User", email)
+    return user
 
 @frappe.whitelist(allow_guest=True)
 def login(email, password):
@@ -41,7 +37,7 @@ def login(email, password):
         "iat": datetime.utcnow(),
         "exp": datetime.utcnow() + timedelta(days=JWT_EXP_DAYS),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+    token = jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGO)
 
     token_hash = hashlib.sha256(token.encode()).hexdigest()
 
