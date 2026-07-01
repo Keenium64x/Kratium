@@ -99,6 +99,11 @@ SYSTEM_CONTEXT = {
 		"query records, search records, read exact records, and count records. "
 		"Web tools can search the public web and read public pages."
 	),
+	"execution_bus": (
+		"The execution bus syncs approved atomic operations. Supported families are DocType create/update/delete, "
+		"report run, dashboard refresh, scheduler run for allowed Kratium methods, notification preparation, "
+		"and future external calls after allowlisting. Every mutating operation must pass security approval before sync."
+	),
 }
 
 
@@ -1461,6 +1466,18 @@ def _orchestration_cache_key(orchestration_id):
 	return f"kratium_orchestration_state:{orchestration_id}"
 
 
+def _execution_preparation_cache_key(plan_id):
+	return f"kratium_execution_preparation:{plan_id}"
+
+
+def _execution_plan_cache_key(plan_id):
+	return f"kratium_execution_plan:{plan_id}"
+
+
+def _execution_sync_report_cache_key(plan_id):
+	return f"kratium_execution_sync_report:{plan_id}"
+
+
 def remember_orchestration_result(result):
 	try:
 		import frappe
@@ -1477,6 +1494,90 @@ def remember_orchestration_result(result):
 			error=str(error),
 		)
 	return result
+
+
+def remember_execution_preparation(preparation):
+	try:
+		import frappe
+
+		preparation = ExecutionPreparation.model_validate(preparation)
+		frappe.cache().set_value(
+			_execution_preparation_cache_key(preparation.plan_id),
+			preparation.model_dump_json(),
+			expires_in_sec=3600,
+		)
+	except Exception as error:
+		logfire.warning(
+			"failed to cache execution preparation",
+			plan_id=getattr(preparation, "plan_id", None),
+			error=str(error),
+		)
+	return preparation
+
+
+def remember_execution_plan(plan):
+	try:
+		import frappe
+
+		plan = ExecutionPlan.model_validate(plan)
+		frappe.cache().set_value(
+			_execution_plan_cache_key(plan.plan_id),
+			plan.model_dump_json(),
+			expires_in_sec=3600,
+		)
+	except Exception as error:
+		logfire.warning(
+			"failed to cache execution plan",
+			plan_id=getattr(plan, "plan_id", None),
+			error=str(error),
+		)
+	return plan
+
+
+def get_cached_execution_preparation(plan_id):
+	import frappe
+
+	preparation_json = frappe.cache().get_value(_execution_preparation_cache_key(plan_id))
+	if not preparation_json:
+		raise ValueError(f"No cached execution preparation found for {plan_id}")
+	return ExecutionPreparation.model_validate_json(preparation_json)
+
+
+def get_cached_execution_plan(plan_id):
+	import frappe
+
+	plan_json = frappe.cache().get_value(_execution_plan_cache_key(plan_id))
+	if not plan_json:
+		raise ValueError(f"No cached execution plan found for {plan_id}")
+	return ExecutionPlan.model_validate_json(plan_json)
+
+
+def remember_execution_sync_report(report):
+	try:
+		import frappe
+
+		report = ExecutionSyncReport.model_validate(report)
+		frappe.cache().set_value(
+			_execution_sync_report_cache_key(report.plan_id),
+			report.model_dump_json(),
+			expires_in_sec=3600,
+		)
+	except Exception as error:
+		logfire.warning(
+			"failed to cache execution sync report",
+			plan_id=getattr(report, "plan_id", None),
+			error=str(error),
+		)
+	return report
+
+
+def get_cached_execution_sync_report(plan_id):
+	import frappe
+
+	report_json = frappe.cache().get_value(_execution_sync_report_cache_key(plan_id))
+	if not report_json:
+		return None
+	return ExecutionSyncReport.model_validate_json(report_json)
 
 
 def get_cached_orchestration_state(orchestration_id):
@@ -1886,17 +1987,41 @@ class ExecutionApprovalResult(Schema):
 	blocked_operation_ids: list[str] = Field(default_factory=list)
 
 
+class AtomicSyncResult(Schema):
+	operation_id: str
+	operation_type: str
+	operation_family: str
+	status: Literal["success", "skipped", "failed", "rolled_back"]
+	message: str
+	record: dict[str, Any] | None = None
+	before: dict[str, Any] | None = None
+	after: dict[str, Any] | None = None
+	output: dict[str, Any] = Field(default_factory=dict)
+	error: str | None = None
+
+
+class ExecutionSyncReport(Schema):
+	plan_id: str
+	status: Literal["complete", "partial", "failed", "blocked"]
+	executed_operation_ids: list[str] = Field(default_factory=list)
+	skipped_operation_ids: list[str] = Field(default_factory=list)
+	failed_operation_ids: list[str] = Field(default_factory=list)
+	results: list[AtomicSyncResult]
+	message: str
+
+
 # endregion 1. SCHEMAS
 
 
 # region 1. PROCESS
 def execute_plan(plan):
-	# For now this stops after security preparation. Actual syncing is the next slice.
+	# Execution always starts with security preparation. Sync requires explicit approval intake.
 	return prepare_execution(plan)
 
 
 def prepare_execution(plan):
 	plan = ExecutionPlan.model_validate(plan)
+	remember_execution_plan(plan)
 	review = run_execution_security_agent(plan)
 	return ExecutionPreparation(
 		plan_id=plan.plan_id,
@@ -1996,19 +2121,313 @@ def build_execution_approval_result(preparation, approved_group_ids, rejected_gr
 	)
 
 
-def execute_atomic_action(action):
-	# Applies exactly one create, update, or delete operation.
-	raise NotImplementedError("Execution syncing is not implemented yet; run prepare_execution first.")
+def sync_approved_execution(plan, approval_result):
+	plan = ExecutionPlan.model_validate(plan)
+	approval_result = ExecutionApprovalResult.model_validate(approval_result)
+	cached_report = get_cached_execution_sync_report(plan.plan_id)
+	if cached_report and cached_report.status == "complete":
+		return cached_report
+	if approval_result.plan_id != plan.plan_id:
+		raise ValueError("Approval result plan_id must match execution plan")
+	if approval_result.status != "ready_to_execute":
+		return build_execution_report(
+			plan,
+			[],
+			summary_status="blocked",
+			message=f"Execution is not approved: {approval_result.status}",
+			skipped_operation_ids=approval_result.waiting_operation_ids + approval_result.blocked_operation_ids,
+		)
+
+	operation_by_id = {operation.operation_id: operation for operation in plan.operations}
+	results = []
+	for operation_id in approval_result.ready_operation_ids:
+		operation = operation_by_id.get(operation_id)
+		if not operation:
+			results.append(AtomicSyncResult(
+				operation_id=operation_id,
+				operation_type="unknown",
+				operation_family="unknown",
+				status="failed",
+				message="Approved operation was not found in the execution plan.",
+				error="Missing operation in plan.",
+			))
+			break
+		result = execute_atomic_action(operation)
+		results.append(result)
+		if result.status == "failed":
+			break
+
+	return remember_execution_sync_report(build_execution_report(
+		plan,
+		results,
+		skipped_operation_ids=[
+			operation.operation_id
+			for operation in plan.operations
+			if operation.operation_id not in {result.operation_id for result in results}
+		],
+	))
 
 
-def build_execution_report(plan, results):
-	# Returns every result and before/after state to the orchestrator.
-	pass
+def execute_atomic_action(operation):
+	if isinstance(operation, CreateRecord):
+		return sync_create_record(operation)
+	if isinstance(operation, UpdateRecord):
+		return sync_update_record(operation)
+	if isinstance(operation, DeleteRecord):
+		return sync_delete_record(operation)
+	if isinstance(operation, RunReport):
+		return sync_run_report(operation)
+	if isinstance(operation, RefreshDashboard):
+		return sync_refresh_dashboard(operation)
+	if isinstance(operation, RunScheduler):
+		return sync_run_scheduler(operation)
+	if isinstance(operation, SendNotification):
+		return sync_send_notification(operation)
+	if isinstance(operation, ExternalCall):
+		return sync_external_call(operation)
+	raise ValueError(f"Unsupported operation type: {operation.operation_type}")
+
+
+def build_execution_report(plan, results, summary_status=None, message=None, skipped_operation_ids=None):
+	results = [AtomicSyncResult.model_validate(result) for result in results]
+	executed_operation_ids = [result.operation_id for result in results if result.status == "success"]
+	failed_operation_ids = [result.operation_id for result in results if result.status == "failed"]
+	skipped_operation_ids = skipped_operation_ids or []
+	if summary_status:
+		status = summary_status
+	elif failed_operation_ids and executed_operation_ids:
+		status = "partial"
+	elif failed_operation_ids:
+		status = "failed"
+	else:
+		status = "complete"
+	return ExecutionSyncReport(
+		plan_id=plan.plan_id,
+		status=status,
+		executed_operation_ids=executed_operation_ids,
+		skipped_operation_ids=skipped_operation_ids,
+		failed_operation_ids=failed_operation_ids,
+		results=results,
+		message=message or build_execution_report_message(status, results, skipped_operation_ids),
+	)
+
+
+def build_execution_report_message(status, results, skipped_operation_ids):
+	if status == "complete":
+		return f"Execution complete: {len(results)} operation(s) synced."
+	if status == "partial":
+		return f"Execution partially completed: {len(results)} attempted, {len(skipped_operation_ids)} skipped."
+	if status == "failed":
+		return "Execution failed before completing approved operations."
+	return "Execution did not run because approval or security requirements are not satisfied."
 
 
 def rollback_execution(results):
-	# Restores completed operations when the execution transaction cannot finish.
-	pass
+	# Rollback is intentionally deferred. Frappe transaction rollback handles same-request failures.
+	return [result.model_dump() if isinstance(result, AtomicSyncResult) else result for result in results]
+
+
+def sync_create_record(operation):
+	import frappe
+
+	try:
+		validate_doctype_operation_fields(operation)
+		doc = frappe.new_doc(operation.doctype)
+		doc.update(coerce_operation_fields_for_sync(operation.doctype, operation.fields))
+		doc.insert()
+		frappe.db.commit()
+		after = _json_safe(doc.as_dict())
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Created {operation.doctype} {doc.name}.",
+			record={"doctype": operation.doctype, "name": doc.name},
+			after=after,
+		)
+	except Exception as error:
+		frappe.db.rollback()
+		return failed_sync_result(operation, error)
+
+
+def sync_update_record(operation):
+	import frappe
+
+	try:
+		validate_doctype_operation_fields(operation)
+		doc = frappe.get_doc(operation.doctype, operation.record_id)
+		before = _json_safe(doc.as_dict())
+		validate_stale_record(operation, before.get("modified"))
+		doc.update(coerce_operation_fields_for_sync(operation.doctype, operation.fields))
+		doc.save()
+		frappe.db.commit()
+		after = _json_safe(doc.as_dict())
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Updated {operation.doctype} {operation.record_id}.",
+			record={"doctype": operation.doctype, "name": operation.record_id},
+			before=before,
+			after=after,
+		)
+	except Exception as error:
+		frappe.db.rollback()
+		return failed_sync_result(operation, error)
+
+
+def sync_delete_record(operation):
+	import frappe
+
+	try:
+		doc = frappe.get_doc(operation.doctype, operation.record_id)
+		before = _json_safe(doc.as_dict())
+		validate_stale_record(operation, before.get("modified"))
+		frappe.delete_doc(operation.doctype, operation.record_id)
+		frappe.db.commit()
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Deleted {operation.doctype} {operation.record_id}.",
+			record={"doctype": operation.doctype, "name": operation.record_id},
+			before=before,
+		)
+	except Exception as error:
+		frappe.db.rollback()
+		return failed_sync_result(operation, error)
+
+
+def sync_run_report(operation):
+	import frappe
+	from frappe.desk.query_report import run as run_report
+
+	try:
+		if not frappe.db.exists("Report", operation.report_name):
+			raise ValueError(f"Unknown report: {operation.report_name}")
+		output = run_report(operation.report_name, filters=operation.filters)
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Ran report {operation.report_name}.",
+			output=_json_safe(output),
+		)
+	except Exception as error:
+		return failed_sync_result(operation, error)
+
+
+def sync_refresh_dashboard(operation):
+	import frappe
+
+	try:
+		if not frappe.db.exists("Dashboard", operation.dashboard_name):
+			raise ValueError(f"Unknown dashboard: {operation.dashboard_name}")
+		dashboard = frappe.get_doc("Dashboard", operation.dashboard_name)
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Loaded dashboard {operation.dashboard_name} for refresh.",
+			record={"doctype": "Dashboard", "name": operation.dashboard_name},
+			output=_json_safe(dashboard.as_dict()),
+		)
+	except Exception as error:
+		return failed_sync_result(operation, error)
+
+
+def sync_run_scheduler(operation):
+	import frappe
+
+	try:
+		method = operation.scheduler_name
+		if not method.startswith("kratium."):
+			raise ValueError("Scheduler operations are limited to kratium methods.")
+		output = frappe.get_attr(method)(**operation.parameters)
+		frappe.db.commit()
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Ran scheduler method {method}.",
+			output=_json_safe(output),
+		)
+	except Exception as error:
+		frappe.db.rollback()
+		return failed_sync_result(operation, error)
+
+
+def sync_send_notification(operation):
+	try:
+		return AtomicSyncResult(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			status="success",
+			message=f"Prepared {operation.channel} notification.",
+			output={
+				"channel": operation.channel,
+				"message": operation.message,
+				"payload": _json_safe(operation.payload),
+			},
+		)
+	except Exception as error:
+		return failed_sync_result(operation, error)
+
+
+def sync_external_call(operation):
+	return AtomicSyncResult(
+		operation_id=operation.operation_id,
+		operation_type=operation.operation_type,
+		operation_family=operation.operation_family,
+		status="failed",
+		message="External calls are not enabled for syncing yet.",
+		error="External sync requires an integration allowlist before execution.",
+	)
+
+
+def validate_stale_record(operation, current_modified):
+	if not expected_modified_matches(current_modified, operation.expected_modified):
+		raise ValueError(
+			f"Stale record for {operation.operation_id}: expected modified {operation.expected_modified}, current modified {current_modified}."
+		)
+
+
+def coerce_operation_fields_for_sync(doctype, fields):
+	meta = _get_sync_meta(doctype)
+	fieldtype_by_name = {field.fieldname: field.fieldtype for field in meta.fields}
+	coerced = {}
+	for fieldname, value in fields.items():
+		fieldtype = fieldtype_by_name.get(fieldname)
+		if fieldtype in {"Datetime", "Date", "Time"} and value is not None:
+			coerced[fieldname] = coerce_datetime_for_frappe(value) if fieldtype in {"Datetime", "Date"} else value
+		else:
+			coerced[fieldname] = value
+	return coerced
+
+
+def coerce_datetime_for_frappe(value):
+	value = _coerce_datetime(value)
+	if value and value.tzinfo:
+		value = value.astimezone(_local_timezone()).replace(tzinfo=None)
+	return value
+
+
+def failed_sync_result(operation, error):
+	return AtomicSyncResult(
+		operation_id=operation.operation_id,
+		operation_type=operation.operation_type,
+		operation_family=operation.operation_family,
+		status="failed",
+		message=f"Failed to sync {operation.operation_id}.",
+		error=str(error),
+	)
 
 
 def build_execution_security_review(plan):
@@ -2371,7 +2790,7 @@ def preview_execution_security(final_input):
 			"orchestration": summarize_orchestration_result(result),
 			"security_preparation": None,
 		}
-	preparation = prepare_execution(result.output)
+	preparation = remember_execution_preparation(prepare_execution(result.output))
 	return {
 		"orchestration": summarize_orchestration_result(result),
 		"security_preparation": summarize_execution_preparation(preparation),
@@ -2506,16 +2925,69 @@ def run_preview_implementation_stage(state):
 
 
 def preview_execution_security_for_plan(plan):
-	return summarize_execution_preparation(prepare_execution(plan))
+	return summarize_execution_preparation(remember_execution_preparation(prepare_execution(plan)))
 
 
 def preview_execution_approval_for_plan(plan, decisions):
-	preparation = prepare_execution(plan)
+	preparation = remember_execution_preparation(prepare_execution(plan))
+	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
+
+
+def preview_approve_cached_execution(plan_id, group_id=None, confirmation_phrase=None):
+	preparation = get_cached_execution_preparation(plan_id)
+	prompts = preparation.security_review.approval_prompts
+	selected_prompts = [prompt for prompt in prompts if group_id in {None, prompt.group_id}]
+	if group_id and not selected_prompts:
+		raise ValueError(f"Approval group {group_id} was not found for plan {plan_id}")
+	decisions = [
+		ExecutionApprovalDecision(
+			group_id=prompt.group_id,
+			approved=True,
+			confirmation_phrase=confirmation_phrase,
+		)
+		for prompt in selected_prompts
+	]
+	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
+
+
+def approve_and_sync_cached_execution(plan_id, group_id=None, confirmation_phrase=None):
+	plan = get_cached_execution_plan(plan_id)
+	preparation = get_cached_execution_preparation(plan_id)
+	prompts = preparation.security_review.approval_prompts
+	selected_prompts = [prompt for prompt in prompts if group_id in {None, prompt.group_id}]
+	if group_id and not selected_prompts:
+		raise ValueError(f"Approval group {group_id} was not found for plan {plan_id}")
+	decisions = [
+		ExecutionApprovalDecision(
+			group_id=prompt.group_id,
+			approved=True,
+			confirmation_phrase=confirmation_phrase,
+		)
+		for prompt in selected_prompts
+	]
+	approval_result = apply_execution_approvals(preparation, decisions)
+	report = sync_approved_execution(plan, approval_result)
+	return {
+		"approval_result": summarize_execution_approval_result(approval_result),
+		"sync_report": summarize_execution_sync_report(report),
+	}
+
+
+def preview_reject_cached_execution(plan_id, group_id=None, note=None):
+	preparation = get_cached_execution_preparation(plan_id)
+	prompts = preparation.security_review.approval_prompts
+	selected_prompts = [prompt for prompt in prompts if group_id in {None, prompt.group_id}]
+	if group_id and not selected_prompts:
+		raise ValueError(f"Approval group {group_id} was not found for plan {plan_id}")
+	decisions = [
+		ExecutionApprovalDecision(group_id=prompt.group_id, approved=False, note=note)
+		for prompt in selected_prompts
+	]
 	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
 
 
 def preview_sample_create_security(count=10):
-	return summarize_execution_preparation(prepare_execution(build_sample_create_plan(count)))
+	return summarize_execution_preparation(build_sample_create_preparation(count))
 
 
 def preview_sample_delete_security(count=10):
@@ -2555,7 +3027,7 @@ def preview_sample_delete_security(count=10):
 
 
 def preview_sample_create_approval(count=10, approve=True):
-	preparation = prepare_execution(build_sample_create_plan(count))
+	preparation = build_sample_create_preparation(count)
 	decisions = [
 		ExecutionApprovalDecision(group_id=prompt.group_id, approved=approve)
 		for prompt in preparation.security_review.approval_prompts
@@ -2591,7 +3063,7 @@ def preview_sample_delete_approval(count=10, confirmation_phrase=None, approve=T
 
 
 def preview_sample_partial_approval():
-	preparation = prepare_execution(build_mixed_approval_sample_plan())
+	preparation = build_mixed_approval_sample_preparation()
 	first_prompt = preparation.security_review.approval_prompts[0]
 	decision = ExecutionApprovalDecision(
 		group_id=first_prompt.group_id,
@@ -2744,6 +3216,42 @@ def build_sample_create_plan(count=10):
 	return build_sample_execution_plan("sample_create_plan", "Preview grouped create approval", operations)
 
 
+def build_sample_create_preparation(count=10):
+	plan = build_sample_create_plan(count)
+	evaluations = [
+		OperationSecurityEvaluation(
+			operation_id=operation.operation_id,
+			operation_type=operation.operation_type,
+			operation_family=operation.operation_family,
+			security_group_key=security_group_key_for_operation(operation, 0.25),
+			permission_type="create",
+			permission_allowed=True,
+			risk_level="low",
+			risk_score=0.25,
+			approval_required=True,
+			explicit_confirmation_required=False,
+			reasons=["Synthetic preview: creates are grouped for one approval."],
+		)
+		for operation in plan.operations
+	]
+	prompts = group_execution_approvals(evaluations)
+	queue = build_execution_queue(plan.operations, evaluations, prompts)
+	review = ExecutionSecurityReview(
+		plan_id=plan.plan_id,
+		status="waiting_for_approval",
+		overall_risk_level="low",
+		overall_risk_score=max(prompt.risk_score for prompt in prompts) if prompts else 0.25,
+		operation_evaluations=evaluations,
+		approval_prompts=prompts,
+		queue=queue,
+	)
+	return ExecutionPreparation(
+		plan_id=plan.plan_id,
+		status=review.status,
+		security_review=review,
+	)
+
+
 def build_sample_delete_plan(count=10):
 	count = max(1, min(int(count), 50))
 	modified = _now()
@@ -2789,6 +3297,53 @@ def build_mixed_approval_sample_plan():
 		),
 	]
 	return build_sample_execution_plan("mixed_approval_sample_plan", "Preview partial approval handling", operations)
+
+
+def build_mixed_approval_sample_preparation():
+	plan = build_mixed_approval_sample_plan()
+	evaluations = [
+		OperationSecurityEvaluation(
+			operation_id="mixed_create_action_1",
+			operation_type="doctype.create",
+			operation_family="doctype",
+			security_group_key="doctype.create:Action",
+			permission_type="create",
+			permission_allowed=True,
+			risk_level="low",
+			risk_score=0.25,
+			approval_required=True,
+			reasons=["Synthetic preview: create operation requires grouped approval."],
+		),
+		OperationSecurityEvaluation(
+			operation_id="mixed_delete_action_1",
+			operation_type="doctype.delete",
+			operation_family="doctype",
+			security_group_key="doctype.delete:Action",
+			permission_type="delete",
+			permission_allowed=True,
+			risk_level="high",
+			risk_score=0.8,
+			approval_required=True,
+			explicit_confirmation_required=True,
+			reasons=["Synthetic preview: delete operation requires explicit confirmation."],
+		),
+	]
+	prompts = group_execution_approvals(evaluations)
+	queue = build_execution_queue(plan.operations, evaluations, prompts)
+	review = ExecutionSecurityReview(
+		plan_id=plan.plan_id,
+		status="waiting_for_approval",
+		overall_risk_level="high",
+		overall_risk_score=max(prompt.risk_score for prompt in prompts),
+		operation_evaluations=evaluations,
+		approval_prompts=prompts,
+		queue=queue,
+	)
+	return ExecutionPreparation(
+		plan_id=plan.plan_id,
+		status=review.status,
+		security_review=review,
+	)
 
 
 def build_sample_execution_plan(plan_id, goal, operations):
@@ -2853,6 +3408,19 @@ def summarize_execution_approval_result(result):
 		"waiting_operation_ids": result.waiting_operation_ids,
 		"blocked_operation_ids": result.blocked_operation_ids,
 		"queue": [item.model_dump() for item in result.queue],
+	}
+
+
+def summarize_execution_sync_report(report):
+	report = ExecutionSyncReport.model_validate(report)
+	return {
+		"plan_id": report.plan_id,
+		"status": report.status,
+		"message": report.message,
+		"executed_operation_ids": report.executed_operation_ids,
+		"skipped_operation_ids": report.skipped_operation_ids,
+		"failed_operation_ids": report.failed_operation_ids,
+		"results": [result.model_dump() for result in report.results],
 	}
 
 # endregion 1. PROCESS
@@ -3087,7 +3655,7 @@ def normalize_operation_fields(fields):
 
 
 def validate_doctype_operation_fields(operation):
-	meta = _get_readable_meta(operation.doctype)
+	meta = _get_sync_meta(operation.doctype)
 	writable_fields = {
 		field.fieldname
 		for field in meta.fields
@@ -3190,6 +3758,14 @@ def _get_readable_meta(doctype):
 
 	if doctype not in AI_READABLE_DOCTYPES:
 		raise ValueError(f"{doctype} is not available to AI read tools")
+	if not frappe.db.exists("DocType", doctype):
+		raise ValueError(f"Unknown DocType: {doctype}")
+	return frappe.get_meta(doctype)
+
+
+def _get_sync_meta(doctype):
+	import frappe
+
 	if not frappe.db.exists("DocType", doctype):
 		raise ValueError(f"Unknown DocType: {doctype}")
 	return frappe.get_meta(doctype)
