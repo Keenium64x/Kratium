@@ -1092,6 +1092,7 @@ def get_execution_security_agent():
 		def validate_execution_security_review(ctx, output):
 			plan = ctx.deps
 			operation_ids = [operation.operation_id for operation in plan.operations]
+			operation_by_id = {operation.operation_id: operation for operation in plan.operations}
 			evaluation_ids = [evaluation.operation_id for evaluation in output.operation_evaluations]
 			queue_ids = [item.operation_id for item in output.queue]
 			approval_operation_ids = [operation_id for prompt in output.approval_prompts for operation_id in prompt.operation_ids]
@@ -1124,6 +1125,14 @@ def get_execution_security_agent():
 				if evaluation.blocking_reasons
 			}
 			evaluation_by_id = {evaluation.operation_id: evaluation for evaluation in output.operation_evaluations}
+			for operation_id, evaluation in evaluation_by_id.items():
+				operation = operation_by_id[operation_id]
+				if evaluation.operation_type != operation.operation_type:
+					raise ModelRetry("Security evaluations must preserve each operation_type exactly")
+				if evaluation.operation_family != operation.operation_family:
+					raise ModelRetry("Security evaluations must preserve each operation_family exactly")
+				if isinstance(operation, (CreateRecord, UpdateRecord, DeleteRecord)) and evaluation.permission_type != doctype_permission_type(operation):
+					raise ModelRetry("DocType security evaluations must preserve the deterministic permission_type")
 			if any(operation_id in blocked_ids for operation_id in approval_operation_ids):
 				raise ModelRetry("Blocked operations cannot be included in approval prompts")
 			for item in output.queue:
@@ -1438,9 +1447,11 @@ def preview_doctype_field_plan(doctype, operation_type, goal, known_values=None)
 	return {
 		"doctype": plan.doctype,
 		"operation_type": plan.operation_type,
-		"required_fields": [field.model_dump() for field in plan.required_fields],
-		"relevant_fields": [field.model_dump() for field in plan.relevant_fields],
-		"avoid_fields": [field.fieldname for field in plan.avoid_fields],
+		"required_fields": plan.required_fields,
+		"relevant_fields": plan.relevant_fields,
+		"avoid_fields": plan.avoid_fields,
+		"field_types": plan.field_types,
+		"select_options": plan.select_options,
 		"field_guidance": plan.field_guidance,
 		"system_notes": plan.system_notes,
 	}
@@ -1855,6 +1866,26 @@ class ExecutionPreparation(Schema):
 	security_review: ExecutionSecurityReview
 
 
+class ExecutionApprovalDecision(Schema):
+	group_id: str
+	approved: bool
+	confirmation_phrase: str | None = None
+	note: str | None = None
+
+
+class ExecutionApprovalResult(Schema):
+	plan_id: str
+	status: Literal["ready_to_execute", "waiting_for_approval", "blocked", "rejected"]
+	approved_group_ids: list[str] = Field(default_factory=list)
+	rejected_group_ids: list[str] = Field(default_factory=list)
+	missing_group_ids: list[str] = Field(default_factory=list)
+	invalid_approval_reasons: list[str] = Field(default_factory=list)
+	queue: list[ExecutionQueueItem]
+	ready_operation_ids: list[str] = Field(default_factory=list)
+	waiting_operation_ids: list[str] = Field(default_factory=list)
+	blocked_operation_ids: list[str] = Field(default_factory=list)
+
+
 # endregion 1. SCHEMAS
 
 
@@ -1877,6 +1908,92 @@ def prepare_execution(plan):
 def request_execution_approval(preparation):
 	preparation = ExecutionPreparation.model_validate(preparation)
 	return preparation.security_review.approval_prompts
+
+
+def apply_execution_approvals(preparation, decisions):
+	preparation = ExecutionPreparation.model_validate(preparation)
+	decisions = [ExecutionApprovalDecision.model_validate(decision) for decision in decisions]
+	review = preparation.security_review
+	prompt_by_id = {prompt.group_id: prompt for prompt in review.approval_prompts}
+	decision_by_id = {decision.group_id: decision for decision in decisions}
+	invalid_reasons = []
+	approved_group_ids = []
+	rejected_group_ids = []
+
+	if review.status == "blocked":
+		return build_execution_approval_result(
+			preparation,
+			approved_group_ids=[],
+			rejected_group_ids=[],
+			invalid_reasons=review.blocked_reasons or ["Execution preparation is blocked."],
+		)
+
+	for decision in decisions:
+		prompt = prompt_by_id.get(decision.group_id)
+		if not prompt:
+			invalid_reasons.append(f"Unknown approval group: {decision.group_id}")
+			continue
+		if not decision.approved:
+			rejected_group_ids.append(decision.group_id)
+			continue
+		if prompt.explicit_confirmation_required and decision.confirmation_phrase != prompt.confirmation_phrase:
+			invalid_reasons.append(
+				f"Approval group {decision.group_id} requires confirmation phrase: {prompt.confirmation_phrase}"
+			)
+			continue
+		approved_group_ids.append(decision.group_id)
+
+	return build_execution_approval_result(
+		preparation,
+		approved_group_ids=approved_group_ids,
+		rejected_group_ids=rejected_group_ids,
+		invalid_reasons=invalid_reasons,
+	)
+
+
+def build_execution_approval_result(preparation, approved_group_ids, rejected_group_ids, invalid_reasons):
+	review = preparation.security_review
+	approved_groups = set(approved_group_ids)
+	rejected_groups = set(rejected_group_ids)
+	required_groups = {prompt.group_id for prompt in review.approval_prompts}
+	missing_groups = sorted(required_groups - approved_groups - rejected_groups)
+	operation_evaluations = {evaluation.operation_id: evaluation for evaluation in review.operation_evaluations}
+	ready_operation_ids = []
+	waiting_operation_ids = []
+	blocked_operation_ids = []
+
+	for item in review.queue:
+		evaluation = operation_evaluations[item.operation_id]
+		if item.blocked or evaluation.blocking_reasons:
+			blocked_operation_ids.append(item.operation_id)
+		elif item.security_group_id in rejected_groups:
+			blocked_operation_ids.append(item.operation_id)
+		elif item.security_group_id in approved_groups or not evaluation.approval_required:
+			ready_operation_ids.append(item.operation_id)
+		else:
+			waiting_operation_ids.append(item.operation_id)
+
+	if invalid_reasons or review.status == "blocked":
+		status = "blocked"
+	elif rejected_groups:
+		status = "rejected"
+	elif waiting_operation_ids or missing_groups:
+		status = "waiting_for_approval"
+	else:
+		status = "ready_to_execute"
+
+	return ExecutionApprovalResult(
+		plan_id=preparation.plan_id,
+		status=status,
+		approved_group_ids=sorted(approved_groups),
+		rejected_group_ids=sorted(rejected_groups),
+		missing_group_ids=missing_groups,
+		invalid_approval_reasons=invalid_reasons,
+		queue=review.queue,
+		ready_operation_ids=ready_operation_ids,
+		waiting_operation_ids=waiting_operation_ids,
+		blocked_operation_ids=blocked_operation_ids,
+	)
 
 
 def execute_atomic_action(action):
@@ -2392,6 +2509,11 @@ def preview_execution_security_for_plan(plan):
 	return summarize_execution_preparation(prepare_execution(plan))
 
 
+def preview_execution_approval_for_plan(plan, decisions):
+	preparation = prepare_execution(plan)
+	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
+
+
 def preview_sample_create_security(count=10):
 	return summarize_execution_preparation(prepare_execution(build_sample_create_plan(count)))
 
@@ -2430,6 +2552,56 @@ def preview_sample_delete_security(count=10):
 		status=review.status,
 		security_review=review,
 	))
+
+
+def preview_sample_create_approval(count=10, approve=True):
+	preparation = prepare_execution(build_sample_create_plan(count))
+	decisions = [
+		ExecutionApprovalDecision(group_id=prompt.group_id, approved=approve)
+		for prompt in preparation.security_review.approval_prompts
+	]
+	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
+
+
+def preview_sample_delete_approval(count=10, confirmation_phrase=None, approve=True):
+	preparation_summary = preview_sample_delete_security(count)
+	preparation = ExecutionPreparation(
+		plan_id=preparation_summary["plan_id"],
+		status=preparation_summary["status"],
+		security_review=ExecutionSecurityReview(
+			plan_id=preparation_summary["plan_id"],
+			status=preparation_summary["status"],
+			overall_risk_level=preparation_summary["overall_risk_level"],
+			overall_risk_score=preparation_summary["overall_risk_score"],
+			blocked_reasons=preparation_summary["blocked_reasons"],
+			approval_prompts=preparation_summary["approval_prompts"],
+			operation_evaluations=preparation_summary["operation_evaluations"],
+			queue=preparation_summary["queue"],
+		),
+	)
+	decisions = [
+		ExecutionApprovalDecision(
+			group_id=prompt.group_id,
+			approved=approve,
+			confirmation_phrase=confirmation_phrase,
+		)
+		for prompt in preparation.security_review.approval_prompts
+	]
+	return summarize_execution_approval_result(apply_execution_approvals(preparation, decisions))
+
+
+def preview_sample_partial_approval():
+	preparation = prepare_execution(build_mixed_approval_sample_plan())
+	first_prompt = preparation.security_review.approval_prompts[0]
+	decision = ExecutionApprovalDecision(
+		group_id=first_prompt.group_id,
+		approved=True,
+		confirmation_phrase=first_prompt.confirmation_phrase,
+	)
+	return {
+		"security_preparation": summarize_execution_preparation(preparation),
+		"approval_result": summarize_execution_approval_result(apply_execution_approvals(preparation, [decision])),
+	}
 
 
 def preview_clear_calendar_security(period="this_week", limit=50):
@@ -2589,6 +2761,36 @@ def build_sample_delete_plan(count=10):
 	return build_sample_execution_plan("sample_delete_plan", "Preview grouped delete approval", operations)
 
 
+def build_mixed_approval_sample_plan():
+	now = _now()
+	operations = [
+		CreateRecord(
+			operation_id="mixed_create_action_1",
+			decision_id="mixed_approval_decision",
+			description="Create one sample Action for mixed approval preview.",
+			doctype="Action",
+			fields={
+				"action_name": "Mixed approval sample event",
+				"description": "Sample event for partial approval preview.",
+				"start_date": now.replace(hour=9, minute=0, second=0, microsecond=0).isoformat(),
+				"end_date": now.replace(hour=10, minute=0, second=0, microsecond=0).isoformat(),
+				"event": True,
+				"todo": False,
+				"status": "Upcoming",
+			},
+		),
+		DeleteRecord(
+			operation_id="mixed_delete_action_1",
+			decision_id="mixed_approval_decision",
+			description="Delete one sample Action for mixed approval preview.",
+			doctype="Action",
+			record_id="SAMPLE-MIXED-DELETE-1",
+			expected_modified=now,
+		),
+	]
+	return build_sample_execution_plan("mixed_approval_sample_plan", "Preview partial approval handling", operations)
+
+
 def build_sample_execution_plan(plan_id, goal, operations):
 	decision_id = operations[0].decision_id
 	return ExecutionPlan(
@@ -2635,6 +2837,22 @@ def summarize_execution_preparation(preparation):
 		"approval_prompts": [prompt.model_dump() for prompt in review.approval_prompts],
 		"operation_evaluations": [evaluation.model_dump() for evaluation in review.operation_evaluations],
 		"queue": [item.model_dump() for item in review.queue],
+	}
+
+
+def summarize_execution_approval_result(result):
+	result = ExecutionApprovalResult.model_validate(result)
+	return {
+		"plan_id": result.plan_id,
+		"status": result.status,
+		"approved_group_ids": result.approved_group_ids,
+		"rejected_group_ids": result.rejected_group_ids,
+		"missing_group_ids": result.missing_group_ids,
+		"invalid_approval_reasons": result.invalid_approval_reasons,
+		"ready_operation_ids": result.ready_operation_ids,
+		"waiting_operation_ids": result.waiting_operation_ids,
+		"blocked_operation_ids": result.blocked_operation_ids,
+		"queue": [item.model_dump() for item in result.queue],
 	}
 
 # endregion 1. PROCESS
