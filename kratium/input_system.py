@@ -2,6 +2,7 @@ import asyncio
 import ipaddress
 import json
 import os
+import re
 import socket
 import time as time_module
 from datetime import datetime, timedelta, time
@@ -16,7 +17,7 @@ import logfire
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic_ai import Agent, ModelHTTPError, ModelMessagesTypeAdapter, ModelRetry, RunContext, Tool, UsageLimits
+from pydantic_ai import Agent, ModelHTTPError, ModelMessagesTypeAdapter, ModelRetry, RunContext, Tool, UnexpectedModelBehavior, UsageLimits
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.gemini import GeminiModel, GeminiModelSettings
 from pydantic_ai.providers.google_gla import GoogleGLAProvider
@@ -490,8 +491,16 @@ class DeleteRecord(OperationBase):
 	operation_type: Literal["doctype.delete"] = "doctype.delete"
 	operation_family: Literal["doctype"] = "doctype"
 	doctype: str
-	record_id: str
-	expected_modified: datetime
+	record_id: str | None = None
+	expected_modified: datetime | None = None
+
+	@model_validator(mode="after")
+	def has_record_or_operation_dependency(self):
+		if self.record_id:
+			return self
+		if any(dependency.target == "operation" for dependency in self.dependencies):
+			return self
+		raise ValueError("Delete operations need record_id or an operation dependency that creates the record")
 
 
 class RunReport(OperationBase):
@@ -801,6 +810,13 @@ materially change implementation. Every chosen_route_id must match one returned 
 
 The selected route should decide only the path. Atomic create/update/delete details belong to
 design_implementation.
+
+Coverage rule:
+- Preserve every distinct requested intent. If one prompt asks to create something and also inspect,
+  update, or delete existing records, the chosen route must cover all parts or ask the user.
+- For compound mutation requests, use outcome_type="plan" and describe each sub-intent in the route.
+- Never choose a create-only, update-only, or delete-only route when the request contains another
+  explicit mutation intent.
 """
 
 DESIGN_IMPLEMENTATION_INSTRUCTIONS = """
@@ -830,6 +846,20 @@ Field rules:
 
 If deterministic implementation is still blocked, return UserClarification with the fewest needed
 questions. Otherwise return operations that reference returned decision_id values.
+
+Coverage rule:
+- The operations must cover every explicit intent preserved in the selected route.
+- If the request contains create + delete, include at least one create operation and either one
+  delete operation per found record or a clear implementation decision proving no matching records
+  exist.
+- If records must be checked before delete/update, call collect_information and use exact record_id
+  and expected_modified from the returned system facts.
+- Never create placeholder, dummy, fake, or non-existent update/delete operations to represent
+  "nothing to change". No matching records means no mutation operation for that sub-intent.
+- If the user explicitly asks to create a temporary record and then delete it, create one
+  doctype.create operation and one doctype.delete operation that depends on the create operation.
+  In that case the delete operation should omit record_id and expected_modified and use an
+  operation dependency pointing to the create operation.
 """
 
 EXECUTION_SECURITY_INSTRUCTIONS = """
@@ -983,6 +1013,7 @@ def get_route_selection_agent():
 
 		@_route_selection_agent.output_validator
 		def validate_route_selection(ctx, output):
+			intent = detect_requested_intents(ctx.deps.input.input)
 			route_ids = [route.route_id for route in output.routes]
 			if output.chosen_route_id not in route_ids:
 				raise ModelRetry("chosen_route_id must match one returned route_id")
@@ -995,6 +1026,13 @@ def get_route_selection_agent():
 				if not chosen_route.missing_information and not chosen_route.risks:
 					raise ModelRetry("ask_user routes must explain what information blocks route selection")
 				return output
+			if len(intent["mutation_intents"]) > 1 and chosen_route.outcome_type != "plan":
+				raise ModelRetry(
+					"Compound mutation requests must choose a plan route that covers every explicit mutation intent"
+				)
+			missing_route_intents = missing_route_intents_for_choice(intent, chosen_route)
+			if missing_route_intents:
+				raise ModelRetry(f"Chosen route dropped requested intent(s): {missing_route_intents}")
 			if chosen_route.outcome_type != "ask_user" and chosen_route.confidence < 0.65:
 				raise ModelRetry("Low-confidence implementation routes should become an ask_user route")
 			if chosen_route.outcome_type != "ask_user" and not chosen_route.system_objects:
@@ -1030,6 +1068,7 @@ def get_action_design_agent():
 				return output
 
 			state = ctx.deps
+			intent = detect_requested_intents(state.input.input)
 			implementation_decision_ids = [decision.decision_id for decision in output.decisions]
 			available_decision_ids = {
 				decision.decision_id for decision in state.route_selection.decisions
@@ -1052,19 +1091,32 @@ def get_action_design_agent():
 				"delete": {"doctype.delete"},
 				"reschedule": {"doctype.update", "scheduler.run"},
 				"classify": {"doctype.update", "dashboard.refresh"},
-				"plan": {"doctype.create", "doctype.update", "scheduler.run", "dashboard.refresh", "notification.send"},
+				"plan": {"doctype.create", "doctype.update", "doctype.delete", "scheduler.run", "dashboard.refresh", "notification.send"},
 				"monitor": {"doctype.create", "doctype.update", "scheduler.run", "notification.send"},
 				"read": set(),
 			}.get(chosen_route.outcome_type, set())
 			operation_types = {operation.operation_type for operation in output.operations}
 			if not operation_types <= allowed_operations:
 				raise ModelRetry("Operations must match the selected route outcome type")
+			missing_operation_intents = missing_operation_intents_for_design(intent, output)
+			if missing_operation_intents:
+				raise ModelRetry(f"Implementation dropped requested intent(s): {missing_operation_intents}")
 			if not output.success_criteria:
 				raise ModelRetry("Implementation design must include success criteria")
 
 			for operation in output.operations:
 				if isinstance(operation, (CreateRecord, UpdateRecord, DeleteRecord)) and operation.doctype not in AI_READABLE_DOCTYPES:
 					raise ModelRetry("DocType operations must use known Kratium DocTypes")
+				if isinstance(operation, UpdateRecord) and is_placeholder_record_id(operation.record_id):
+					raise ModelRetry(
+						"Update/delete operations must use real record_id values returned from system information. "
+						"If no matching records exist, do not create a placeholder operation; record that no delete/update is needed in decisions."
+					)
+				if isinstance(operation, DeleteRecord) and operation.record_id and is_placeholder_record_id(operation.record_id):
+					raise ModelRetry(
+						"Delete operations must use real record_id values returned from system information, or depend on a prior create operation. "
+						"Do not use placeholder record IDs."
+					)
 				if isinstance(operation, (CreateRecord, UpdateRecord)):
 					try:
 						validate_doctype_operation_fields(operation)
@@ -1072,7 +1124,7 @@ def get_action_design_agent():
 						raise ModelRetry(str(exc)) from exc
 				if isinstance(operation, UpdateRecord):
 					operation.expected_modified = _coerce_datetime(operation.expected_modified)
-				elif isinstance(operation, DeleteRecord):
+				elif isinstance(operation, DeleteRecord) and operation.expected_modified:
 					operation.expected_modified = _coerce_datetime(operation.expected_modified)
 
 			return output
@@ -1098,6 +1150,10 @@ def get_execution_security_agent():
 			plan = ctx.deps
 			operation_ids = [operation.operation_id for operation in plan.operations]
 			operation_by_id = {operation.operation_id: operation for operation in plan.operations}
+			deterministic_evaluation_by_id = {
+				evaluation.operation_id: evaluation
+				for evaluation in [evaluate_operation_security(plan, operation) for operation in plan.operations]
+			}
 			evaluation_ids = [evaluation.operation_id for evaluation in output.operation_evaluations]
 			queue_ids = [item.operation_id for item in output.queue]
 			approval_operation_ids = [operation_id for prompt in output.approval_prompts for operation_id in prompt.operation_ids]
@@ -1132,14 +1188,32 @@ def get_execution_security_agent():
 			evaluation_by_id = {evaluation.operation_id: evaluation for evaluation in output.operation_evaluations}
 			for operation_id, evaluation in evaluation_by_id.items():
 				operation = operation_by_id[operation_id]
+				deterministic = deterministic_evaluation_by_id[operation_id]
 				if evaluation.operation_type != operation.operation_type:
 					raise ModelRetry("Security evaluations must preserve each operation_type exactly")
 				if evaluation.operation_family != operation.operation_family:
 					raise ModelRetry("Security evaluations must preserve each operation_family exactly")
 				if isinstance(operation, (CreateRecord, UpdateRecord, DeleteRecord)) and evaluation.permission_type != doctype_permission_type(operation):
 					raise ModelRetry("DocType security evaluations must preserve the deterministic permission_type")
+				if evaluation.security_group_key != deterministic.security_group_key:
+					raise ModelRetry("Security evaluations must preserve deterministic security_group_key values")
+				if evaluation.permission_allowed != deterministic.permission_allowed:
+					raise ModelRetry("Security evaluations must preserve deterministic permission_allowed values")
+				if evaluation.approval_required != deterministic.approval_required:
+					raise ModelRetry("Security evaluations must preserve deterministic approval_required values")
+				if evaluation.explicit_confirmation_required != deterministic.explicit_confirmation_required:
+					raise ModelRetry("Security evaluations must preserve deterministic explicit confirmation requirements")
+				if evaluation.risk_level != deterministic.risk_level or evaluation.risk_score != deterministic.risk_score:
+					raise ModelRetry("Security evaluations must preserve deterministic risk levels and scores")
 			if any(operation_id in blocked_ids for operation_id in approval_operation_ids):
 				raise ModelRetry("Blocked operations cannot be included in approval prompts")
+			for prompt in output.approval_prompts:
+				prompt_evaluations = [evaluation_by_id[operation_id] for operation_id in prompt.operation_ids]
+				if any(evaluation.explicit_confirmation_required for evaluation in prompt_evaluations):
+					if not prompt.explicit_confirmation_required or not prompt.confirmation_phrase:
+						raise ModelRetry("Approval prompts must preserve explicit confirmation requirements from operation evaluations")
+				if prompt.risk_level in {"high", "critical"} and (not prompt.explicit_confirmation_required or not prompt.confirmation_phrase):
+					raise ModelRetry("High and critical approval prompts require an explicit confirmation phrase")
 			for item in output.queue:
 				expected_group = approval_group_by_operation.get(item.operation_id)
 				if expected_group and item.security_group_id != expected_group:
@@ -1620,6 +1694,83 @@ def route_selection_to_user_clarification(route_selection):
 	)
 
 
+def detect_requested_intents(text):
+	text = (text or "").lower()
+	create_terms = {"add", "create", "schedule", "make", "insert", "record", "plan"}
+	update_terms = {"update", "change", "move", "reschedule", "rename", "mark", "complete"}
+	delete_terms = {"delete", "remove", "clear", "cancel"}
+	read_terms = {"check", "show", "what", "list", "find", "look", "planned"}
+	intents = {
+		"create": any(term in text for term in create_terms),
+		"update": any(term in text for term in update_terms),
+		"delete": any(term in text for term in delete_terms),
+		"read": any(term in text for term in read_terms),
+	}
+	mutation_intents = [name for name in ("create", "update", "delete") if intents[name]]
+	return {
+		"create": intents["create"],
+		"update": intents["update"],
+		"delete": intents["delete"],
+		"read": intents["read"],
+		"mutation_intents": mutation_intents,
+	}
+
+
+def missing_route_intents_for_choice(intent, chosen_route):
+	if chosen_route.outcome_type == "plan":
+		return []
+	missing = []
+	if intent["create"] and chosen_route.outcome_type != "create":
+		missing.append("create")
+	if intent["update"] and chosen_route.outcome_type not in {"update", "reschedule", "classify"}:
+		missing.append("update")
+	if intent["delete"] and chosen_route.outcome_type != "delete":
+		missing.append("delete")
+	if intent["read"] and chosen_route.outcome_type not in {"read", "delete", "update", "plan"}:
+		missing.append("read/check")
+	return missing
+
+
+def missing_operation_intents_for_design(intent, design):
+	operation_types = {operation.operation_type for operation in design.operations}
+	decision_text = "\n".join(
+		f"{decision.question} {decision.conclusion} {' '.join(decision.alternatives)}"
+		for decision in design.decisions
+	).lower()
+	missing = []
+	if intent["create"] and "doctype.create" not in operation_types:
+		missing.append("create")
+	if intent["update"] and "doctype.update" not in operation_types and "scheduler.run" not in operation_types:
+		missing.append("update")
+	if intent["delete"] and "doctype.delete" not in operation_types:
+		no_records_found = any(
+			phrase in decision_text
+			for phrase in ("no matching", "none found", "no records", "nothing to delete", "no actions found")
+		)
+		if not no_records_found:
+			missing.append("delete")
+	return missing
+
+
+def is_placeholder_record_id(record_id):
+	if not record_id:
+		return True
+	text = str(record_id).lower().strip()
+	placeholder_terms = {
+		"non_existent",
+		"nonexistent",
+		"placeholder",
+		"dummy",
+		"fake",
+		"sample",
+		"unknown",
+		"todo",
+		"n/a",
+		"none",
+	}
+	return any(term in text for term in placeholder_terms)
+
+
 def assumption_review_to_clarification(review):
 	return ClarificationResult(
 		problem=ProblemBreakdown(
@@ -1784,7 +1935,7 @@ def summarize_execution_operation(operation):
 			**base,
 			"doctype": operation.doctype,
 			"record_id": operation.record_id,
-			"expected_modified": operation.expected_modified.isoformat(),
+			"expected_modified": operation.expected_modified.isoformat() if operation.expected_modified else None,
 		}
 	return _json_safe(operation.model_dump())
 
@@ -2152,7 +2303,11 @@ def sync_approved_execution(plan, approval_result):
 				error="Missing operation in plan.",
 			))
 			break
-		result = execute_atomic_action(operation)
+		try:
+			operation = resolve_operation_dependencies(operation, results)
+			result = execute_atomic_action(operation)
+		except Exception as error:
+			result = failed_sync_result(operation, error)
 		results.append(result)
 		if result.status == "failed":
 			break
@@ -2186,6 +2341,23 @@ def execute_atomic_action(operation):
 	if isinstance(operation, ExternalCall):
 		return sync_external_call(operation)
 	raise ValueError(f"Unsupported operation type: {operation.operation_type}")
+
+
+def resolve_operation_dependencies(operation, prior_results):
+	if not isinstance(operation, DeleteRecord) or operation.record_id:
+		return operation
+	result_by_operation = {result.operation_id: result for result in prior_results}
+	for dependency in operation.dependencies:
+		if dependency.target != "operation":
+			continue
+		result = result_by_operation.get(dependency.operation_id)
+		if not result or result.status != "success" or not result.record:
+			raise ValueError(f"Dependency {dependency.operation_id} did not produce a record to delete")
+		return operation.model_copy(update={
+			"record_id": result.record.get("name"),
+			"expected_modified": _coerce_datetime((result.after or {}).get("modified")),
+		})
+	raise ValueError(f"Delete operation {operation.operation_id} has no resolved record_id")
 
 
 def build_execution_report(plan, results, summary_status=None, message=None, skipped_operation_ids=None):
@@ -2458,13 +2630,105 @@ def run_execution_security_agent(plan):
 	plan = ExecutionPlan.model_validate(plan)
 	evaluations = [evaluate_operation_security(plan, operation) for operation in plan.operations]
 	prompt = build_execution_security_prompt(plan, evaluations)
-	result = _run_agent_sync_with_retry(
-		get_execution_security_agent(),
-		prompt=prompt,
-		deps=plan,
-		conversation_id=f"execution-security-{plan.plan_id}",
+	try:
+		result = _run_agent_sync_with_retry(
+			get_execution_security_agent(),
+			prompt=prompt,
+			deps=plan,
+			conversation_id=f"execution-security-{plan.plan_id}",
+		)
+		return normalize_execution_security_review(plan, result.output, evaluations)
+	except Exception as error:
+		if not isinstance(error, (UnexpectedModelBehavior, UsageLimitExceeded)) and not _is_temporary_ai_provider_error(error):
+			raise
+		logfire.warning(
+			"execution security agent unavailable; using deterministic security review",
+			plan_id=plan.plan_id,
+			error=str(error),
+		)
+		return build_execution_security_review_from_evaluations(plan, evaluations)
+
+
+def normalize_execution_security_review(plan, review, evaluations):
+	plan = ExecutionPlan.model_validate(plan)
+	review = ExecutionSecurityReview.model_validate(review)
+	evaluation_by_id = {evaluation.operation_id: evaluation for evaluation in evaluations}
+	normalized_prompts = [
+		normalize_execution_approval_prompt(prompt, evaluation_by_id)
+		for prompt in review.approval_prompts
+	]
+	queue = build_execution_queue(plan.operations, evaluations, normalized_prompts)
+	blocked_reasons = [reason for evaluation in evaluations for reason in evaluation.blocking_reasons]
+	overall_score = max([evaluation.risk_score for evaluation in evaluations] or [0])
+	if normalized_prompts:
+		overall_score = max(overall_score, max(prompt.risk_score for prompt in normalized_prompts))
+	status = "blocked" if blocked_reasons else "waiting_for_approval" if normalized_prompts else "ready_to_execute"
+	return ExecutionSecurityReview(
+		plan_id=plan.plan_id,
+		status=status,
+		overall_risk_level=risk_level_from_score(overall_score),
+		overall_risk_score=overall_score,
+		operation_evaluations=evaluations,
+		approval_prompts=normalized_prompts,
+		queue=queue,
+		blocked_reasons=blocked_reasons,
 	)
-	return result.output
+
+
+def normalize_execution_approval_prompt(prompt, evaluation_by_id):
+	prompt_evaluations = [
+		evaluation_by_id[operation_id]
+		for operation_id in prompt.operation_ids
+		if operation_id in evaluation_by_id
+	]
+	if not prompt_evaluations:
+		return prompt
+	base_score = max(evaluation.risk_score for evaluation in prompt_evaluations)
+	risk_score = max(prompt.risk_score, adjust_group_risk_score(base_score, prompt_evaluations))
+	risk_level = risk_level_from_score(risk_score)
+	explicit_confirmation = (
+		prompt.explicit_confirmation_required
+		or any(evaluation.explicit_confirmation_required for evaluation in prompt_evaluations)
+		or risk_level in {"high", "critical"}
+	)
+	confirmation_phrase = prompt.confirmation_phrase
+	if explicit_confirmation and not confirmation_phrase:
+		confirmation_phrase = f"Approve {len(prompt.operation_ids)} {risk_level} risk operation{'s' if len(prompt.operation_ids) != 1 else ''}"
+	if not explicit_confirmation:
+		confirmation_phrase = None
+
+	return ExecutionApprovalPrompt(
+		group_id=prompt.group_id,
+		group_key=prompt.group_key,
+		title=prompt.title,
+		operation_ids=prompt.operation_ids,
+		risk_level=risk_level,
+		risk_score=risk_score,
+		permission_types=sorted({evaluation.permission_type for evaluation in prompt_evaluations if evaluation.permission_type}),
+		prompt=prompt.prompt,
+		reasons=sorted({*prompt.reasons, *[reason for evaluation in prompt_evaluations for reason in evaluation.reasons]}),
+		explicit_confirmation_required=explicit_confirmation,
+		confirmation_phrase=confirmation_phrase,
+	)
+
+
+def build_execution_security_review_from_evaluations(plan, evaluations):
+	prompts = group_execution_approvals(evaluations)
+	queue = build_execution_queue(plan.operations, evaluations, prompts)
+	blocked_reasons = [reason for evaluation in evaluations for reason in evaluation.blocking_reasons]
+	overall_score = max([evaluation.risk_score for evaluation in evaluations] or [0])
+	if prompts:
+		overall_score = max(overall_score, max(prompt.risk_score for prompt in prompts))
+	return ExecutionSecurityReview(
+		plan_id=plan.plan_id,
+		status="blocked" if blocked_reasons else "waiting_for_approval" if prompts else "ready_to_execute",
+		overall_risk_level=risk_level_from_score(overall_score),
+		overall_risk_score=overall_score,
+		operation_evaluations=evaluations,
+		approval_prompts=prompts,
+		queue=queue,
+		blocked_reasons=blocked_reasons,
+	)
 
 
 def build_execution_security_prompt(plan, evaluations):
@@ -2565,6 +2829,10 @@ def check_operation_permission(operation, permission_type):
 		if isinstance(operation, CreateRecord):
 			doc = frappe.new_doc(operation.doctype)
 			doc.update(operation.fields)
+		elif isinstance(operation, DeleteRecord) and not operation.record_id:
+			if frappe.has_permission(operation.doctype, "delete"):
+				return True, f"Current user has delete permission for {operation.doctype}; dependency target will be checked at sync time."
+			return False, f"Current user does not have delete permission for {operation.doctype}."
 		else:
 			doc = frappe.get_doc(operation.doctype, operation.record_id)
 		doc.check_permission(permission_type)
@@ -2576,6 +2844,8 @@ def check_operation_permission(operation, permission_type):
 def inspect_operation_record_state(operation):
 	if not isinstance(operation, (UpdateRecord, DeleteRecord)):
 		return None, [], []
+	if isinstance(operation, DeleteRecord) and not operation.record_id:
+		return None, ["Delete target will be resolved from a prior operation dependency at sync time."], []
 
 	reasons = []
 	blocking_reasons = []
@@ -2774,6 +3044,7 @@ def risk_level_from_score(score):
 
 
 def preview_execution_security(final_input):
+	state = None
 	try:
 		result = run_preview_orchestration_pipeline(final_input)
 	except Exception as error:
@@ -2782,6 +3053,8 @@ def preview_execution_security(final_input):
 			result = _network_pause_result(state, error)
 		elif isinstance(error, UsageLimitExceeded):
 			result = _usage_limit_pause_result(state, error)
+		elif isinstance(error, UnexpectedModelBehavior):
+			result = _model_behavior_pause_result(state, error)
 		else:
 			raise
 	remember_orchestration_result(result)
@@ -2795,6 +3068,21 @@ def preview_execution_security(final_input):
 		"orchestration": summarize_orchestration_result(result),
 		"security_preparation": summarize_execution_preparation(preparation),
 	}
+
+
+def _model_behavior_pause_result(state, error):
+	return OrchestrationRunResult(
+		output=OrchestrationPaused(
+			stage=state.stage,
+			required_tool=_required_tool_for_stage(state.stage),
+			reason=(
+				"The AI stage could not produce a valid schema after retries. "
+				"No system records were changed. This usually means the request exposed a missing schema pattern or validator rule. "
+				f"Error: {error}"
+			),
+		),
+		state=state,
+	)
 
 
 def run_preview_orchestration_pipeline(final_input):
@@ -2824,6 +3112,13 @@ def build_preview_orchestration_state(final_input):
 
 
 def run_preview_clarification_stage(state):
+	clarification = deterministic_clarification_for_exact_request(state.input.input)
+	if clarification:
+		state.clarification = clarification
+		state.user_clarification = None
+		state.stage = "route_selection"
+		return clarification
+
 	prompt = (
 		f"Original input:\n{state.input.model_dump_json()}"
 		f"\n\nSystem context:\n{to_jsonable_python(SYSTEM_CONTEXT)}"
@@ -2843,6 +3138,25 @@ def run_preview_clarification_stage(state):
 	state.user_clarification = None
 	state.stage = "route_selection"
 	return result.output
+
+
+def deterministic_clarification_for_exact_request(text):
+	text = text or ""
+	lower_text = text.lower()
+	has_exact_date = bool(re.search(r"\b20\d{2}-\d{2}-\d{2}\b", text))
+	has_time = bool(re.search(r"\b\d{1,2}:\d{2}\b", text))
+	has_action_intent = any(term in lower_text for term in ("create", "add", "delete", "update", "check", "planned"))
+	if not (has_exact_date and has_time and has_action_intent):
+		return None
+	return ClarificationResult(
+		problem=ProblemBreakdown(
+			goal=text,
+			assumptions=[],
+			information_needed=[],
+		),
+		evidence=[Evidence(source="input", reference="exact request", fact="The request includes exact dates, times, and action intent.")],
+		confidence=0.95,
+	)
 
 
 def run_preview_assumption_review(state, clarification):
@@ -2905,6 +3219,10 @@ def run_preview_implementation_stage(state):
 		f"\n\nSystem context:\n{to_jsonable_python(SYSTEM_CONTEXT)}"
 		f"\n\nCurrent datetime:\n{_now().isoformat()}"
 		f"\n\nInformation already collected:\n{to_jsonable_python(state.information)}"
+		f"\n\nExecution bus contract:\nReturn operations, not actions. "
+		f"Each operation needs operation_type, operation_family, operation_id, decision_id, description, and operation-specific input. "
+		f"Use doctype.create/update/delete for DocType records. Other families are report, dashboard, scheduler, notification, and external. "
+		f"Cover every explicit user intent. Do not drop create/update/delete/check sub-requests from compound prompts."
 		"\n\nPreview pipeline: design implementation once and return the execution plan."
 	)
 	result = _run_agent_sync_with_retry(
@@ -3073,6 +3391,30 @@ def preview_sample_partial_approval():
 	return {
 		"security_preparation": summarize_execution_preparation(preparation),
 		"approval_result": summarize_execution_approval_result(apply_execution_approvals(preparation, [decision])),
+	}
+
+
+def preview_sample_create_then_delete_sync():
+	plan = build_create_then_delete_sample_plan()
+	preparation = build_execution_security_review_from_evaluations(
+		plan,
+		[evaluate_operation_security(plan, operation) for operation in plan.operations],
+	)
+	preparation = ExecutionPreparation(plan_id=plan.plan_id, status=preparation.status, security_review=preparation)
+	decisions = [
+		ExecutionApprovalDecision(
+			group_id=prompt.group_id,
+			approved=True,
+			confirmation_phrase=prompt.confirmation_phrase,
+		)
+		for prompt in preparation.security_review.approval_prompts
+	]
+	approval_result = apply_execution_approvals(preparation, decisions)
+	report = sync_approved_execution(plan, approval_result)
+	return {
+		"security_preparation": summarize_execution_preparation(preparation),
+		"approval_result": summarize_execution_approval_result(approval_result),
+		"sync_report": summarize_execution_sync_report(report),
 	}
 
 
@@ -3344,6 +3686,67 @@ def build_mixed_approval_sample_preparation():
 		status=review.status,
 		security_review=review,
 	)
+
+
+def build_create_then_delete_sample_plan():
+	now = _now().replace(hour=21, minute=30, second=0, microsecond=0)
+	create_operation = CreateRecord(
+		operation_id="sample_create_temporary_event",
+		decision_id="sample_create_then_delete_decision",
+		description="Create a temporary event for dependency delete validation.",
+		doctype="Action",
+		fields={
+			"action_name": "Temporary dependency delete test",
+			"description": "Temporary event used to validate create-then-delete sync.",
+			"start_date": now.isoformat(),
+			"end_date": (now + timedelta(minutes=30)).isoformat(),
+			"event": True,
+			"todo": False,
+			"status": "Upcoming",
+		},
+	)
+	delete_operation = DeleteRecord(
+		operation_id="sample_delete_temporary_event",
+		decision_id="sample_create_then_delete_decision",
+		description="Delete the temporary event created by the previous operation.",
+		doctype="Action",
+		dependencies=[OperationDependency(target="operation", operation_id=create_operation.operation_id)],
+	)
+	return build_sample_execution_plan(
+		"sample_create_then_delete_plan",
+		"Preview create-then-delete dependency sync",
+		[create_operation, delete_operation],
+	)
+
+
+def preview_security_normalization_regression():
+	plan = build_create_then_delete_sample_plan()
+	deterministic_evaluations = [evaluate_operation_security(plan, operation) for operation in plan.operations]
+	prompts = group_execution_approvals(deterministic_evaluations)
+	weakened_prompts = [prompt.model_copy(deep=True) for prompt in prompts]
+	weakened_evaluations = [evaluation.model_copy(deep=True) for evaluation in deterministic_evaluations]
+	for prompt in weakened_prompts:
+		if prompt.group_key == "doctype.delete:Action":
+			prompt.explicit_confirmation_required = False
+			prompt.confirmation_phrase = None
+	for evaluation in weakened_evaluations:
+		if evaluation.operation_type == "doctype.delete":
+			evaluation.explicit_confirmation_required = False
+	weakened_review = ExecutionSecurityReview(
+		plan_id=plan.plan_id,
+		status="waiting_for_approval",
+		overall_risk_level="high",
+		overall_risk_score=0.8,
+		operation_evaluations=weakened_evaluations,
+		approval_prompts=weakened_prompts,
+		queue=build_execution_queue(plan.operations, weakened_evaluations, weakened_prompts),
+	)
+	normalized = normalize_execution_security_review(plan, weakened_review, deterministic_evaluations)
+	return summarize_execution_preparation(ExecutionPreparation(
+		plan_id=plan.plan_id,
+		status=normalized.status,
+		security_review=normalized,
+	))
 
 
 def build_sample_execution_plan(plan_id, goal, operations):
@@ -3642,7 +4045,7 @@ def normalize_action_design(action_design, chosen_route, state=None):
 			operation.expected_modified = _coerce_datetime(operation.expected_modified)
 			normalize_operation_fields(operation.fields)
 			normalize_doctype_operation_fields(operation, chosen_route, state)
-		elif isinstance(operation, DeleteRecord):
+		elif isinstance(operation, DeleteRecord) and operation.expected_modified:
 			operation.expected_modified = _coerce_datetime(operation.expected_modified)
 	return action_design
 
