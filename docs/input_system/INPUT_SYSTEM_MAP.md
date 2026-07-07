@@ -62,11 +62,31 @@ Important current station functions:
 - `clarify_request(ctx)`
 - `collect_information(ctx, question, reason, desired_output, source_scope, context)`
 - `select_route(ctx)`
+- `get_action_blueprint_agent()`
+- `expand_action_implementation_blueprint(text, blueprint)`
+- `compile_action_blueprint_execution_plan(text, blueprint)`
 - `design_implementation(ctx)`
 - `request_user_clarification(state, clarification)`
 - `compile_execution_plan(state)`
 - `handoff_to_execution_bus(state, plan)`
 - `resume_orchestration(state, new_information)`
+
+Clarification boundary:
+- clarification should ask for missing implementation details, not security permission;
+- random/any choices requested by the user should flow into route and implementation as AI decisions;
+- destructive risk is handled by the execution bus security review and approval prompts, not by pausing route selection.
+
+Progressive design interview:
+- large structured prompts can run a one-question-at-a-time interview before route selection;
+- simple batch operation prompts such as “create 10 actions then delete 3” skip the interview and go straight to orchestration/security;
+- the interview first classifies scope/domain and estimates likely Action count range;
+- before asking, the interview infers high-confidence scope/detail/structure/assumption answers directly from the prompt and adds them to the design brief;
+- large regimes still ask high-impact scope questions such as minimum size, detail level, horizon, hierarchy, and naming when those decisions materially change operation count or Action tree shape;
+- questions should not walk a fixed checklist; after one high-impact answer, infer downstream decisions where reasonable and ask again only if another unresolved decision still materially changes the build;
+- each answer is stored, then the next question plan is recalculated so later questions can depend on earlier answers;
+- AI Execution Console stores `question_plan`, `question_answers`, and `active_question_id` as hidden JSON/data fields;
+- AI Execution Console rechecks stored `question_plan` before processing; stale interview state for prompts that now classify as simple batch operations is cleared and rerouted to execution/security;
+- once the interview is complete, a design brief with answers and system assumptions is appended to the prompt sent into orchestration.
 
 ### Execution Bus
 
@@ -91,9 +111,37 @@ execute_plan(plan)
   → ExecutionSyncReport / ExecutionReport
 ```
 
+Same-plan record references:
+- create/update operations may put an earlier `operation_id` into writable Link/parent fields;
+- `compile_execution_plan` normalizes those references into operation dependencies;
+- sync resolves same-plan operation IDs to the real Frappe record names after the dependency succeeds;
+- tree/hierarchy records should create parents before children, then children link to the parent operation ID;
+- for `Action`, this supports `parent_action`/`ancestor`; for other DocTypes, sync uses DocType metadata to discover tree parent and Link fields.
+
+Approval console behavior:
+- approval prompts are recorded per security group;
+- a user-requested manual approval test can force even low-risk groups to require approve/deny;
+- approval/denial only records the decision and does not sync immediately;
+- once every required group has a recorded decision, the request becomes ready to execute;
+- sync runs approved operations and skips denied operation groups.
+- `Ready to Execute` is an execution state: pressing Process from that state runs the sync path.
+- stale approval decisions from older security plans are ignored; only current security group IDs count.
+- execution preview/readable output should list the actual operations synced, including created/deleted record IDs.
+- read-only search/list/show requests can complete in the console with information results instead of going through execution security.
+- counted random Action requests must preserve counts; for example 10 creates and 3 deletes becomes 13 atomic operations.
+
 Important boundary:
 - orchestration designs intended operations;
 - execution bus decides whether operations are safe enough to run and whether user approval is needed.
+
+Action implementation model:
+- Action-building requests now use an Action blueprint station before atomic operation compilation;
+- the AI produces a compact `ActionImplementationBlueprint` with groups, repeated templates, target count, assumptions, and implementation notes;
+- deterministic compiler code expands that blueprint into one `doctype.create` operation per Action record;
+- template variables such as subject/week/activity become concrete names and may become real parent group Actions;
+- abstract blueprint groups containing placeholders are not synced as literal placeholder records;
+- this is the default Action creation path, not a special study/workout shortcut;
+- the older one-shot `ImplementationDesign` model remains as fallback for non-Action or unsupported operation-family work.
 
 ### Tools
 
