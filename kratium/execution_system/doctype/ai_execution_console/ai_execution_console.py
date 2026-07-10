@@ -11,6 +11,7 @@ from kratium.input_system import (
 	ExecutionPlan,
 	ExecutionApprovalDecision,
 	ExecutionPreparation,
+	DesignQuestionPlan,
 	apply_execution_approvals,
 	classify_design_scope,
 	continue_cached_orchestration,
@@ -91,12 +92,15 @@ def compact_preview(data):
 		return {
 			"stage": "design_interview",
 			"status": "waiting_for_answer",
+			"message": interview.get("message"),
 			"scope_type": interview.get("scope_type"),
 			"domain": interview.get("domain"),
 			"likely_action_count_range": interview.get("likely_action_count_range"),
+			"question_budget": interview.get("question_budget") or {},
 			"active_question": interview.get("active_question"),
 			"answered_count": interview.get("answered_count"),
 			"remaining_count": interview.get("remaining_count"),
+			"strengthened_assumptions": interview.get("strengthened_assumptions") or [],
 			"system_assumptions": interview.get("system_assumptions") or [],
 		}
 	if interview and interview.get("status") == "complete" and not any(
@@ -434,21 +438,7 @@ def _start_progressive_design_interview(doc):
 	_set_question_answers(doc, [])
 	if not next_design_question(plan):
 		return _finish_progressive_design_interview(doc)
-	doc.status = "Waiting for User"
-	doc.stage = "clarification"
-	_set_preview(doc, {
-		"design_interview": {
-			"status": "waiting_for_answer",
-			"scope_type": plan.scope_type,
-			"domain": plan.domain,
-			"likely_action_count_range": list(plan.likely_action_count_range),
-			"active_question": _active_design_question(doc),
-			"answered_count": 0,
-			"remaining_count": len(plan.questions),
-			"inferred_answers": plan.inferred_answers,
-			"system_assumptions": plan.system_assumptions,
-		}
-	})
+	_show_progressive_design_question(doc, plan, [])
 	return True
 
 
@@ -466,7 +456,7 @@ def _continue_progressive_design_interview(doc):
 	if not active_question:
 		return _finish_progressive_design_interview(doc)
 	if not doc.response:
-		frappe.throw("Enter the answer in Response, then press Process again.")
+		return _show_progressive_design_question(doc, plan, _question_answers(doc), message="Enter the answer in Response, then press Process again.")
 	answers = _question_answers(doc)
 	answers.append({
 		"question_id": active_question.get("question_id"),
@@ -478,26 +468,38 @@ def _continue_progressive_design_interview(doc):
 	_set_question_answers(doc, answers)
 	doc.response = None
 	if new_plan and next_design_question(new_plan):
-		_set_question_plan(doc, new_plan)
-		doc.status = "Waiting for User"
-		doc.stage = "clarification"
-		_set_preview(doc, {
-			"design_interview": {
-				"status": "waiting_for_answer",
-				"scope_type": new_plan.scope_type,
-				"domain": new_plan.domain,
-				"likely_action_count_range": list(new_plan.likely_action_count_range),
-				"active_question": _active_design_question(doc),
-				"answered_count": len(answers),
-				"remaining_count": len(new_plan.questions),
-				"answers": answers,
-				"inferred_answers": new_plan.inferred_answers,
-				"system_assumptions": new_plan.system_assumptions,
-			}
-		})
-		return _save(doc)
+		return _show_progressive_design_question(doc, new_plan, answers)
 	_set_question_plan(doc, new_plan or plan)
 	return _finish_progressive_design_interview(doc)
+
+
+def _show_progressive_design_question(doc, plan, answers=None, message=None):
+	plan = DesignQuestionPlan.model_validate(plan)
+	_set_question_plan(doc, plan)
+	doc.status = "Waiting for User"
+	doc.stage = "clarification"
+	interview = {
+		"status": "waiting_for_answer",
+		"scope_type": plan.scope_type,
+		"domain": plan.domain,
+		"likely_action_count_range": list(plan.likely_action_count_range),
+		"active_question": _active_design_question(doc),
+		"answered_count": len(answers or []),
+		"remaining_count": len(plan.questions),
+		"answers": answers or [],
+		"inferred_answers": plan.inferred_answers,
+		"system_assumptions": plan.system_assumptions,
+		"question_budget": plan.information_map.question_budget if plan.information_map else {},
+		"strengthened_assumptions": [
+			assumption.model_dump(mode="json") if hasattr(assumption, "model_dump") else assumption
+			for assumption in ((plan.information_map.assumptions if plan.information_map else []) or [])
+			if str((assumption.assumption_id if hasattr(assumption, "assumption_id") else assumption.get("assumption_id", ""))).startswith("strengthened_")
+		],
+	}
+	if message:
+		interview["message"] = message
+	_set_preview(doc, {"design_interview": interview})
+	return _save(doc)
 
 
 def _prompt_still_needs_design_interview(doc):
@@ -640,16 +642,24 @@ def build_readable_output(data):
 	interview = data.get("design_interview") or {}
 	if interview and interview.get("status") == "waiting_for_answer":
 		question = interview.get("active_question") or {}
+		budget = interview.get("question_budget") or {}
 		lines = [
 			f"Design scope: {interview.get('scope_type')} / {interview.get('domain')}",
 			f"Estimated size: {interview.get('likely_action_count_range')}",
+			f"Questions asked: {budget.get('asked_count', 0)}; planner decides if more are needed",
 			f"Question: {question.get('question')}",
 			f"Why: {question.get('reason')}",
 		]
+		if interview.get("message"):
+			lines.insert(0, interview.get("message"))
 		if question.get("options"):
 			lines.append("Options: " + ", ".join(question.get("options")))
 		if question.get("default_assumption"):
 			lines.append(f"Default assumption if you agree: {question.get('default_assumption')}")
+		strengthened = interview.get("strengthened_assumptions") or []
+		if strengthened:
+			lines.append("Assumptions I strengthened instead of asking:")
+			lines.extend(f"- {assumption.get('statement')}" for assumption in strengthened[:4])
 		return "\n".join(line for line in lines if line)
 	if interview and interview.get("status") == "complete":
 		return (
@@ -926,7 +936,12 @@ def process_background(name, previous_status="Draft"):
 			if _question_plan(doc):
 				return _continue_progressive_design_interview(doc)
 			if not doc.response:
-				frappe.throw("Enter the answer in Response, then press Process again.")
+				_set_preview(doc, {
+					"status": "waiting_for_answer",
+					"message": "Enter the answer in Response, then press Process again.",
+				})
+				doc.status = "Waiting for User"
+				return _save(doc)
 			result = continue_cached_orchestration(doc.orchestration_id, doc.response)
 			_apply_orchestration(doc, result)
 			if isinstance(result.output, ExecutionPlan):
@@ -1016,6 +1031,7 @@ def preview_design_interview(prompt, answers_json=None):
 		"active_question": question.model_dump() if question else None,
 		"answered_count": len(combined_answers),
 		"remaining_count": len(plan.questions),
+		"information_map": plan.information_map.model_dump(mode="json") if plan.information_map else None,
 		"inferred_answers": plan.inferred_answers,
 		"system_assumptions": plan.system_assumptions,
 		"answers": combined_answers,

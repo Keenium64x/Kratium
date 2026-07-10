@@ -44,6 +44,35 @@ LOGFIRE_DIRECTORY = APP_DIRECTORY / ".logfire"
 
 LOGFIRE_CONSOLE_VERBOSE = os.getenv("KRATIUM_AI_LOGFIRE_VERBOSE", "0") == "1"
 
+INFORMATION_REQUIREMENT_STOPWORDS = {
+	"a",
+	"an",
+	"and",
+	"are",
+	"as",
+	"be",
+	"by",
+	"for",
+	"from",
+	"in",
+	"into",
+	"is",
+	"it",
+	"must",
+	"of",
+	"on",
+	"or",
+	"preserve",
+	"required",
+	"should",
+	"that",
+	"the",
+	"this",
+	"to",
+	"using",
+	"with",
+}
+
 MODEL_SETTINGS = GeminiModelSettings(
 	temperature=0,
 	max_tokens=8192,
@@ -368,6 +397,77 @@ class DesignQuestion(Schema):
 	required: bool = True
 
 
+class DesignAssumption(Schema):
+	assumption_id: str
+	category: Literal["scope", "structure", "content", "naming", "timing", "fields", "doctype", "security", "other"]
+	statement: str
+	reason: str
+	confidence: float = Field(ge=0, le=1)
+	ask_if_below: float = Field(default=0.65, ge=0, le=1)
+	impact: Literal["low", "medium", "high", "critical"] = "medium"
+
+
+class DesignUnknown(Schema):
+	unknown_id: str
+	category: Literal["scope", "structure", "content", "naming", "timing", "fields", "doctype", "other"]
+	question: str
+	reason: str
+	impact: Literal["low", "medium", "high", "critical"]
+	default_assumption: str | None = None
+	options: list[str] = Field(default_factory=list)
+	fieldname: str | None = None
+	ask: bool = False
+
+
+class DesignMapDimensionReview(Schema):
+	dimension: Literal["scope", "scale", "structure", "timing", "naming", "content", "fields", "relationships", "assumptions", "security_separation", "other"]
+	status: Literal["resolved", "assumed", "delegated", "needs_user"]
+	impact: Literal["low", "medium", "high", "critical"]
+	reason: str
+	next_gap: str | None = None
+
+
+class DesignFieldIntent(Schema):
+	doctype: str
+	fieldname: str
+	label: str | None = None
+	value_strategy: Literal["user_provided", "inferred", "assumed", "ask", "skip"] = "skip"
+	value: Any = None
+	reason: str = ""
+	confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+class DesignImplementationRequirement(Schema):
+	requirement_id: str
+	category: Literal["scope", "structure", "content", "naming", "timing", "fields", "doctype", "relationship", "template", "other"]
+	description: str
+	source: Literal["prompt", "answer", "information_map", "doctype", "inferred"] = "information_map"
+	must_preserve: bool = True
+	evidence: list[str] = Field(default_factory=list)
+	blueprint_hint: str = ""
+	validation_terms: list[str] = Field(default_factory=list)
+
+
+class DesignInformationMap(Schema):
+	goal: str
+	domain: Literal["workout", "study", "generic"]
+	scope_type: Literal["simple_action", "structured_plan", "large_regime", "generic_structured_plan"]
+	target_doctype: str = "Action"
+	question_budget: dict[str, Any] = Field(default_factory=dict)
+	doctype_strategy: dict[str, Any] = Field(default_factory=dict)
+	scale_model: dict[str, Any] = Field(default_factory=dict)
+	structure_model: dict[str, Any] = Field(default_factory=dict)
+	content_model: dict[str, Any] = Field(default_factory=dict)
+	time_model: dict[str, Any] = Field(default_factory=dict)
+	naming_model: dict[str, Any] = Field(default_factory=dict)
+	field_intents: list[DesignFieldIntent] = Field(default_factory=list)
+	implementation_requirements: list[DesignImplementationRequirement] = Field(default_factory=list)
+	assumptions: list[DesignAssumption] = Field(default_factory=list)
+	unknowns: list[DesignUnknown] = Field(default_factory=list)
+	readiness: Literal["ready", "needs_question"] = "ready"
+	readiness_reason: str = ""
+
+
 class DesignQuestionPlan(Schema):
 	plan_id: str = Field(default_factory=lambda: str(uuid4()))
 	scope_type: Literal["simple_action", "structured_plan", "large_regime", "generic_structured_plan"]
@@ -376,6 +476,33 @@ class DesignQuestionPlan(Schema):
 	questions: list[DesignQuestion] = Field(default_factory=list)
 	inferred_answers: list[dict[str, Any]] = Field(default_factory=list)
 	system_assumptions: list[str] = Field(default_factory=list)
+	information_map: DesignInformationMap | None = None
+
+
+class DesignQuestionPlannerDecision(Schema):
+	status: Literal["ready", "ask"]
+	reasoning_summary: str
+	complexity_assessment: str
+	estimated_total_questions: int = Field(ge=0, le=30)
+	dimension_reviews: list[DesignMapDimensionReview] = Field(default_factory=list)
+	ready_blockers: list[str] = Field(default_factory=list)
+	question: DesignQuestion | None = None
+	assumptions_to_make: list[DesignAssumption] = Field(default_factory=list)
+	map_gaps_resolved_by_assumption: list[str] = Field(default_factory=list)
+
+	@model_validator(mode="after")
+	def question_matches_status(self):
+		if self.status == "ask" and self.question is None:
+			raise ValueError("status='ask' requires question")
+		if self.status == "ready" and self.question is not None:
+			raise ValueError("status='ready' must not include question")
+		if self.status == "ready" and self.ready_blockers:
+			raise ValueError("status='ready' cannot include ready_blockers")
+		if self.status == "ready" and not self.dimension_reviews:
+			raise ValueError("status='ready' requires dimension_reviews proving map completeness")
+		if self.status == "ready" and any(review.status == "needs_user" and review.impact in {"high", "critical"} for review in self.dimension_reviews):
+			raise ValueError("status='ready' cannot leave high-impact dimensions needing the user")
+		return self
 
 
 class ActionBlueprintItem(Schema):
@@ -838,6 +965,40 @@ Return clarified_goal rewritten with the accepted assumptions included. Keep rem
 only for decisions that still truly need user input.
 """
 
+DESIGN_QUESTION_PLANNER_INSTRUCTIONS = """
+You are the dynamic design-interview planner for Kratium.
+
+Your job is not to follow a checklist. Your job is to read the user's original prompt, all prior
+answers, and the current DesignInformationMap, then decide whether exactly one more question is
+worth asking before implementation.
+
+Core behavior:
+- Build an internal information map covering scope, extent, structure, relationships, timing,
+  naming, content detail, field strategy, assumptions, and implementation risk to the design.
+- Estimate how many total questions the problem deserves based on complexity and the user's detail
+  preference. Small/simple requests should need 0 questions. Broad system-design requests may need
+  several, but only when each question materially changes the blueprint.
+- If the user's answer already gives enough structure, do not ask generic follow-up questions like
+  "how detailed should descriptions be". Make sensible assumptions and list them.
+- If the user says "you decide", "figure it out", "make assumptions", or gives enough direction,
+  proceed by strengthening assumptions instead of asking.
+- Ask the fewest concise, high-leverage questions possible. Prefer one bundled question that
+  resolves several connected assumptions over multiple template questions.
+- The question must be specific to the actual build being discussed, not a reusable canned wording.
+- Never ask security, approval, permission, or confirmation questions. Execution security handles
+  final mutation risk.
+- Do not ask about facts a system tool could discover. Use assumptions for creative preferences;
+  leave system lookup to later implementation/information stages.
+
+Return status="ready" when the map is sufficient for blueprint design. In that case include the
+assumptions you are making, especially for loose naming, timing, tree structure, descriptions, and
+field population.
+
+Return status="ask" only when a missing decision would materially change the structure, count,
+relationships, timing model, or meaning of the generated records. The question should be written
+for the current prompt and prior answers.
+"""
+
 INFORMATION_INSTRUCTIONS = """
 Answer the supplied InformationRequest by investigating available sources.
 
@@ -1037,6 +1198,7 @@ Rules:
 _orchestrator_agents = {}
 _clarification_agent = None
 _assumption_review_agent = None
+_design_question_planner_agent = None
 _information_agents = {}
 _route_selection_agent = None
 _action_blueprint_agent = None
@@ -1082,6 +1244,35 @@ def get_assumption_review_agent():
 			return output
 
 	return _assumption_review_agent
+
+
+def get_design_question_planner_agent():
+	global _design_question_planner_agent
+
+	if _design_question_planner_agent is None:
+		_design_question_planner_agent = create_ai_agent(
+			DesignQuestionPlannerDecision,
+			DESIGN_QUESTION_PLANNER_INSTRUCTIONS,
+			name="design_question_planner_agent",
+			retries=2,
+		)
+
+		@_design_question_planner_agent.output_validator
+		def validate_design_question_planner(ctx, output):
+			if output.status == "ask":
+				question_text = (output.question.question if output.question else "").lower()
+				if any(term in question_text for term in ("permission", "approve", "confirm", "security")):
+					raise ModelRetry("Design interview must not ask permission/security questions.")
+				if output.question and output.question.question_id in {"naming_rules", "timing_model", "content_detail_model"}:
+					raise ModelRetry("Do not use old fixed question IDs. Create a prompt-specific question_id.")
+				if output.question and not design_question_shapes_implementation_map(output.question):
+					raise ModelRetry(
+						"The design question is preference-only. Ask one concise question that shapes the implementation map: "
+						"hierarchy, parent/child levels, templates versus generated instances, scale, timing/scheduling, naming, or assumptions."
+					)
+			return output
+
+	return _design_question_planner_agent
 
 
 def get_information_agent(source_scope="system"):
@@ -1214,9 +1405,90 @@ def get_action_blueprint_agent():
 			capacity = 1 + len(output.groups) + sum(template.count for template in output.templates)
 			if capacity < output.target_action_count:
 				raise ModelRetry("Blueprint capacity is smaller than target_action_count")
+			validate_blueprint_against_information_map(ctx, output)
 			return output
 
 	return _action_blueprint_agent
+
+
+def validate_blueprint_against_information_map(ctx, blueprint):
+	map_data = extract_information_map_from_blueprint_context(ctx)
+	if not map_data:
+		return
+	requirements = map_data.get("implementation_requirements") or []
+	missing_requirements = [
+		requirement
+		for requirement in requirements
+		if requirement.get("must_preserve", True)
+		and not blueprint_preserves_information_requirement(blueprint, requirement)
+	]
+	if missing_requirements:
+		raise ModelRetry(
+			"Blueprint did not preserve required information-map detail(s): "
+			+ "; ".join(requirement.get("description", requirement.get("requirement_id", "unnamed requirement")) for requirement in missing_requirements[:3])
+			+ ". Represent each requirement in groups, templates, variables, assumptions, or implementation_notes."
+		)
+
+
+def extract_information_map_from_blueprint_context(ctx):
+	try:
+		text = ctx.deps.input.input if ctx and ctx.deps and ctx.deps.input else ""
+	except Exception:
+		return None
+	return extract_information_map_from_text(text)
+
+
+def blueprint_preserves_information_requirement(blueprint, requirement):
+	requirement = dict(requirement or {})
+	terms = normalized_requirement_terms(requirement)
+	if not terms:
+		return True
+	blueprint_text = normalized_blueprint_contract_text(blueprint)
+	return any(term in blueprint_text for term in terms)
+
+
+def normalized_requirement_terms(requirement):
+	terms = []
+	for key in ("validation_terms", "evidence"):
+		for value in requirement.get(key) or []:
+			terms.extend(extract_contract_terms(value))
+	terms.extend(extract_contract_terms(requirement.get("description")))
+	terms.extend(extract_contract_terms(requirement.get("blueprint_hint")))
+	return list(dict.fromkeys(term for term in terms if len(term) > 2))
+
+
+def normalized_blueprint_contract_text(blueprint):
+	parts = [blueprint.title or ""]
+	parts.extend(blueprint.assumptions or [])
+	parts.extend(blueprint.implementation_notes or [])
+	for group in blueprint.groups:
+		parts.extend([group.group_id or "", group.name or "", group.description or ""])
+	for template in blueprint.templates:
+		parts.extend([template.template_id or "", template.name_pattern or "", template.description_pattern or ""])
+		parts.extend((template.variables or {}).keys())
+		for values in (template.variables or {}).values():
+			parts.extend(values or [])
+	return normalize_contract_text(" ".join(str(part) for part in parts if part is not None))
+
+
+def extract_contract_terms(value):
+	text = normalize_contract_text(value)
+	if not text:
+		return []
+	phrases = [phrase.strip() for phrase in re.split(r"[,;:\n→]+", text) if phrase.strip()]
+	terms = []
+	for phrase in phrases:
+		words = [word for word in re.findall(r"[a-z0-9_]+", phrase) if word not in INFORMATION_REQUIREMENT_STOPWORDS]
+		if not words:
+			continue
+		terms.extend(words)
+		if len(words) > 1:
+			terms.append(" ".join(words[:4]))
+	return terms
+
+
+def normalize_contract_text(value):
+	return re.sub(r"\s+", " ", str(value or "").lower()).strip()
 
 
 def get_action_design_agent():
@@ -3558,6 +3830,29 @@ def _model_behavior_pause_result(state, error):
 	)
 
 
+def deterministic_information_answer_for_supported_request(final_input):
+	text = final_input if isinstance(final_input, str) else getattr(final_input, "input", "")
+	lower_text = (text or "").lower()
+	if not is_read_only_information_request(lower_text):
+		return None
+	return InformationAnswer(results=[InformationResult(
+		request_id="deterministic_read_only_preview",
+		status="partial",
+		answer="This request was recognized as read-only, but no deterministic local answer is available without running the information agent.",
+		requested_output="Read-only information answer",
+		strategy=["classified request as read-only", "left detailed answering to information collection when needed"],
+		facts=[Evidence(source="system", reference="deterministic read-only classifier", fact="No system records were mutated.")],
+		missing_information=["Detailed answer requires the information collection stage."],
+		confidence=0.55,
+	)])
+
+
+def is_read_only_information_request(lower_text):
+	if any(term in lower_text for term in ("create", "add", "make", "update", "change", "delete", "remove", "sync")):
+		return False
+	return any(term in lower_text for term in ("show", "list", "search", "find", "what", "which", "how many", "count", "check"))
+
+
 def run_preview_orchestration_pipeline(final_input):
 	information_answer = deterministic_information_answer_for_supported_request(final_input)
 	if information_answer:
@@ -3571,7 +3866,7 @@ def run_preview_orchestration_pipeline(final_input):
 		state = build_preview_orchestration_state(final_input)
 		state.clarification = ClarificationResult(
 			problem=fallback_plan.problem,
-			evidence=[Evidence(source="system", reference="deterministic preview fallback", fact="A supported random todo create/delete request was converted into concrete execution operations.")],
+			evidence=[Evidence(source="system", reference="deterministic preview fallback", fact="A supported counted Action request was converted into concrete execution operations.")],
 			confidence=0.86,
 		)
 		state.route_selection = RouteSelection(
@@ -3615,12 +3910,123 @@ def deterministic_execution_plan_for_supported_request(final_input):
 	return build_deterministic_create_delete_action_plan(text)
 
 
+def should_use_deterministic_create_delete_action_plan(text):
+	"""Use deterministic fallback only where no record lookup is needed."""
+	lower_text = (text or "").lower()
+	if not any(term in lower_text for term in ("action", "actions", "todo", "todos")):
+		return False
+	if not any(term in lower_text for term in ("create", "add", "make")):
+		return False
+	if not extract_count_before_terms(lower_text, ("create", "add", "make")):
+		return False
+	if any(term in lower_text for term in ("delete", "remove")):
+		return False
+	return not should_use_action_blueprint_implementation(text)
+
+
+def should_use_action_blueprint_implementation(text):
+	"""Route broad Action-building requests to the blueprint station, not one-shot operations."""
+	lower_text = (text or "").lower()
+	if not any(term in lower_text for term in ("action", "todo", "routine", "regime", "plan", "schedule", "workout", "study", "subject", "template")):
+		return False
+	if is_read_only_information_request(lower_text):
+		return False
+	blueprint_terms = (
+		"routine",
+		"regime",
+		"study",
+		"workout",
+		"template",
+		"tree",
+		"hierarchy",
+		"under",
+		"parent",
+		"child",
+		"children",
+		"period",
+		"schedule",
+		"daily",
+		"weekly",
+		"subject",
+		"subjects",
+		"milestone",
+		"focus",
+	)
+	if any(term in lower_text for term in blueprint_terms):
+		return True
+	create_count = extract_count_before_terms(lower_text, ("create", "add", "make")) or 0
+	return create_count >= 15
+
+
+def extract_count_before_terms(text, terms):
+	lower_text = (text or "").lower()
+	for term in terms:
+		match = re.search(rf"(?:{term})\s+(\d+)\b|\b(\d+)\s+\w*\s*{term}", lower_text)
+		if match:
+			return int(next(group for group in match.groups() if group))
+	return None
+
+
+def build_deterministic_create_delete_action_plan(text):
+	create_count = extract_count_before_terms(text, ("create", "add", "make")) or 1
+	decision = Decision(
+		decision_id="deterministic_counted_action_create_decision",
+		question="Can the simple counted Action creation request be represented as atomic operations?",
+		conclusion=f"Create {create_count} Action record(s).",
+		alternatives=["Use the AI blueprint station for structured or broad designs."],
+		evidence=[Evidence(source="system", reference="deterministic counted create fallback", fact="The request contains an explicit create count for Action records and no lookup-dependent mutation.")],
+		confidence=0.84,
+	)
+	operations = []
+	for index in range(create_count):
+		operations.append(CreateRecord(
+			operation_id=f"create_random_action_{index + 1:03d}",
+			decision_id=decision.decision_id,
+			description=f"Create random Action {index + 1} of {create_count}.",
+			doctype="Action",
+			fields={
+				"action_name": f"Random Action {index + 1}",
+				"description": "Generated by deterministic counted Action fallback.",
+				"status": "Upcoming",
+				"todo": True,
+				"event": False,
+			},
+		))
+	return ExecutionPlan(
+		plan_id=str(uuid4()),
+		problem=ProblemBreakdown(
+			goal=text,
+			assumptions=["No structured design language detected, so deterministic create fallback is allowed."],
+		),
+		routes_considered=[RouteOption(
+			route_id="deterministic_counted_action_batch",
+			outcome_type="create",
+			description="Compile explicit counted Action create/delete request into atomic execution operations.",
+			expected_outcome="Execution bus evaluates and syncs each atomic operation.",
+			system_objects=["Action"],
+			evidence=[Evidence(source="system", reference="deterministic counted batch fallback", fact="Explicit operation counts were found in the request.")],
+			missing_information=[],
+			reversibility="low",
+			risks=["Delete operations are destructive and require security review."],
+			confidence=0.84,
+			score=0.84,
+		)],
+		chosen_route_id="deterministic_counted_action_batch",
+		decisions=[decision],
+		operations=operations,
+		success_criteria=[SuccessCriterion(
+			description="Verify counted Action create operations were attempted.",
+			check="Compare executed operation count to requested create count.",
+			expected_result=f"{create_count} operation(s) attempted with per-operation results.",
+		)],
+	)
+
+
 def build_action_blueprint_execution_plan_for_request(text):
 	"""Fallback Action implementation path when the model blueprint station is unavailable."""
 	if not should_use_action_blueprint_implementation(text):
 		return None
-	blueprint = build_action_plan_blueprint(text)
-	return compile_action_blueprint_execution_plan(text, blueprint)
+	return None
 
 
 def should_use_action_blueprint_station(state):
@@ -3642,13 +4048,18 @@ def build_action_blueprint_prompt(state, chosen_route):
 		f"\n\nCurrent datetime:\n{_now().isoformat()}"
 		f"\n\nInformation already collected:\n{to_jsonable_python(state.information)}"
 		"\n\nDesign a compact ActionImplementationBlueprint. "
-		"Do not emit execution operations. The compiler will expand groups/templates into atomic Action creates."
+		"Do not emit execution operations. The compiler will expand groups/templates into atomic Action creates. "
+		"The Design information map inside the input is an implementation contract. Preserve every "
+		"implementation_requirements item in blueprint groups, templates, variables, assumptions, or notes. "
+		"Do not flatten structure, timing, naming, template, relationship, or field requirements into a generic parent. "
+		"Use variable names that come from the map requirements and user answers rather than fixed domain examples."
 	)
 
 
 def action_implementation_design_from_blueprint(text, blueprint):
+	blueprint = normalize_action_blueprint_from_information_map(text, blueprint)
 	compiled_blueprint = expand_action_implementation_blueprint(text, blueprint)
-	plan = compile_action_blueprint_execution_plan(text, compiled_blueprint)
+	plan = compile_expanded_blueprint_to_execution_plan(text, compiled_blueprint)
 	return ImplementationDesign(
 		decisions=plan.decisions,
 		operations=plan.operations,
@@ -3656,862 +4067,336 @@ def action_implementation_design_from_blueprint(text, blueprint):
 	)
 
 
-def should_use_action_blueprint_implementation(text):
-	"""Decide whether the request should use the Action blueprint compiler.
-
-	This is the default path for Action-building requests. It is not limited to
-	large prompts; large prompts are only where the difference matters most.
-	"""
-	lower = (text or "").lower()
-	if has_incomplete_at_least_constraint(lower):
-		return False
-	if not any(term in lower for term in ("action", "actions", "todo", "todos", "task", "tasks", "routine", "regime", "study", "workout", "plan", "schedule", "program")):
-		return False
-	if not any(term in lower for term in ("create", "add", "make", "build", "design")):
-		return False
-	if "delete" in lower and not any(term in lower for term in ("study", "workout", "routine", "regime", "plan", "schedule", "program")):
-		return False
-	return True
-
-
-def extract_requested_action_count(text, default=None):
-	lower = (text or "").lower()
-	patterns = [
-		r"\bat\s*least\s+(\d+)\s+(?:action|actions|todo|todos|tasks?)\b",
-		r"\b(?:create|add|make|build|design)\s+(\d+)\s+(?:action|actions|todo|todos|tasks?)\b",
-		r"\b(\d+)\s+(?:action|actions|todo|todos|tasks?)\b",
-	]
-	for pattern in patterns:
-		match = re.search(pattern, lower)
-		if match:
-			return max(1, min(int(match.group(1)), 500))
-	return default
-
-
-def build_action_plan_blueprint(text):
-	domain = classify_large_action_domain(text)
-	target_count = target_large_action_count(text, domain)
-	if domain == "study":
-		return build_study_action_blueprint(text, target_count)
-	if domain == "workout":
-		return build_workout_action_blueprint(text, target_count)
-	return build_generic_action_blueprint(text, target_count)
-
-
 def expand_action_implementation_blueprint(text, blueprint):
+	"""Expand blueprint groups/templates into concrete Action blueprint items."""
 	blueprint = ActionImplementationBlueprint.model_validate(blueprint)
-	now = _now().replace(second=0, microsecond=0)
-	start_day = now + timedelta(days=1)
-	items: list[ActionBlueprintItem] = []
-	root_id = "create_action_blueprint_root"
-	items.append(ActionBlueprintItem(
-		operation_id=root_id,
-		action_name=blueprint.title,
-		description="Top-level Action generated from the AI implementation blueprint.",
-		start_date=start_day,
-		end_date=start_day + timedelta(days=max(1, blueprint.target_action_count // 5)),
-		is_group=True,
-		todo=False,
-		event=False,
-	))
-	group_to_operation_id: dict[str, str] = {}
+	now = _now()
+	items = []
+	group_operation_ids = {}
 	for index, group in enumerate(blueprint.groups, start=1):
-		parent_id = group_to_operation_id.get(group.parent_group_id) if group.parent_group_id else root_id
-		if is_abstract_blueprint_group(group):
-			group_to_operation_id[group.group_id] = parent_id
-			continue
-		operation_id = f"create_group_{safe_operation_slug(group.group_id)}_{index:03d}"
-		group_to_operation_id[group.group_id] = operation_id
-		group_start = start_day + timedelta(days=index - 1)
+		operation_id = safe_operation_id(f"group_{group.group_id}")
+		group_operation_ids[group.group_id] = operation_id
+		parent_operation_id = group_operation_ids.get(group.parent_group_id)
+		start_date = now + timedelta(days=max(0, index - 1))
+		end_date = start_date + timedelta(days=max(1, group.estimated_days))
 		items.append(ActionBlueprintItem(
 			operation_id=operation_id,
 			action_name=group.name,
 			description=group.description,
-			start_date=group_start,
-			end_date=group_start + timedelta(days=max(1, group.estimated_days), hours=1),
+			start_date=start_date,
+			end_date=end_date,
 			is_group=True,
 			todo=False,
 			event=False,
-			parent_operation_id=parent_id,
+			parent_operation_id=parent_operation_id,
+			status="Upcoming",
 		))
-	append_template_items_from_blueprint(items, blueprint, group_to_operation_id, root_id, start_day)
-	if len(items) < blueprint.target_action_count:
-		append_filler_items_from_blueprint(items, blueprint, root_id, start_day)
+	for template in blueprint.templates:
+		items.extend(expand_action_blueprint_template(template, group_operation_ids, now))
+	if not items:
+		items.append(ActionBlueprintItem(
+			operation_id="create_action_blueprint_root",
+			action_name=blueprint.title,
+			description="Generated Action structure root.",
+			start_date=now,
+			end_date=now + timedelta(hours=1),
+			is_group=True,
+			todo=False,
+			event=False,
+			status="Upcoming",
+		))
 	return ActionPlanBlueprint(
 		domain=blueprint.domain,
 		target_action_count=blueprint.target_action_count,
 		items=items[:blueprint.target_action_count],
-		assumptions=blueprint.assumptions + blueprint.implementation_notes,
-		source="ai_blueprint",
+		assumptions=list(blueprint.assumptions or []) + list(blueprint.implementation_notes or []),
+		source="ai_action_implementation_blueprint",
 	)
 
 
-def is_abstract_blueprint_group(group):
-	return bool(re.search(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}", f"{group.name} {group.description}"))
-
-
-def append_template_items_from_blueprint(items, blueprint, group_to_operation_id, root_id, start_day):
-	leaf_index = 0
-	variable_group_operation_ids: dict[tuple[str, str, str | None], str] = {}
-	for template_index, template in enumerate(blueprint.templates, start=1):
-		base_parent_id = group_to_operation_id.get(template.parent_group_id) if template.parent_group_id else root_id
-		for template_item_index in range(1, template.count + 1):
-			if len(items) >= blueprint.target_action_count:
-				return
-			leaf_index += 1
-			context = blueprint_variable_context(template.variables, template_item_index)
-			parent_id = ensure_variable_group_path(
-				items=items,
-				blueprint=blueprint,
-				template=template,
-				context=context,
-				base_parent_id=base_parent_id,
-				variable_group_operation_ids=variable_group_operation_ids,
-				start_day=start_day,
-			)
-			if len(items) >= blueprint.target_action_count:
-				return
-			start = start_day + timedelta(days=(leaf_index - 1) // 5, hours=((leaf_index - 1) % 5) + 1)
-			items.append(ActionBlueprintItem(
-				operation_id=f"create_template_{safe_operation_slug(template.template_id)}_{template_item_index:03d}",
-				action_name=render_blueprint_pattern(template.name_pattern, template_item_index, template.count, template.template_id, template.variables, context),
-				description=render_blueprint_pattern(template.description_pattern, template_item_index, template.count, template.template_id, template.variables, context),
-				start_date=start,
-				end_date=start + timedelta(minutes=template.duration_minutes),
-				is_group=False,
-				todo=template.todo,
-				event=template.event,
-				parent_operation_id=parent_id,
-			))
-
-
-def blueprint_variable_context(variables, index):
-	context = {}
-	for name, choices in (variables or {}).items():
-		if not choices:
-			continue
-		context[name] = str(choices[(index - 1) % len(choices)])
-	return context
-
-
-def ensure_variable_group_path(items, blueprint, template, context, base_parent_id, variable_group_operation_ids, start_day):
-	parent_id = base_parent_id
-	for variable_name in blueprint_group_variable_order(context):
-		variable_value = context.get(variable_name)
-		if not variable_value:
-			continue
-		key = (variable_name, variable_value, parent_id)
-		if key in variable_group_operation_ids:
-			parent_id = variable_group_operation_ids[key]
-			continue
-		if len(items) >= blueprint.target_action_count:
-			return parent_id
-		operation_id = f"create_group_{safe_operation_slug(variable_name)}_{safe_operation_slug(variable_value)}_{len(variable_group_operation_ids) + 1:03d}"
-		variable_group_operation_ids[key] = operation_id
-		group_start = start_day + timedelta(days=len(variable_group_operation_ids))
+def expand_action_blueprint_template(template, group_operation_ids, base_datetime):
+	"""Expand one repeated template using variable combinations and count."""
+	variables = template.variables or {}
+	combinations = variable_combinations(variables)
+	if not combinations:
+		combinations = [{}]
+	items = []
+	parent_operation_id = group_operation_ids.get(template.parent_group_id)
+	for index in range(template.count):
+		values = dict(combinations[index % len(combinations)])
+		values.setdefault("index", index + 1)
+		values.setdefault("number", index + 1)
+		name = render_action_template_text(template.name_pattern, values, fallback=f"{template.name_pattern} {index + 1}")
+		description = render_action_template_text(template.description_pattern, values, fallback=template.description_pattern)
+		start_date = base_datetime + timedelta(days=index)
+		end_date = start_date + timedelta(minutes=template.duration_minutes)
 		items.append(ActionBlueprintItem(
-			operation_id=operation_id,
-			action_name=variable_group_action_name(variable_name, variable_value),
-			description=f"Generated grouping Action for {variable_name} = {variable_value} from template {template.template_id}.",
-			start_date=group_start,
-			end_date=group_start + timedelta(days=max(1, blueprint.target_action_count // 20), hours=1),
-			is_group=True,
-			todo=False,
-			event=False,
-			parent_operation_id=parent_id,
-		))
-		parent_id = operation_id
-	return parent_id
-
-
-def blueprint_group_variable_order(context):
-	preferred = ["subject", "course", "module", "week", "day", "phase"]
-	return [name for name in preferred if name in context]
-
-
-def variable_group_action_name(variable_name, variable_value):
-	label = re.sub(r"[_-]+", " ", variable_name or "group").strip().title()
-	return f"{label}: {variable_value}"
-
-
-def append_filler_items_from_blueprint(items, blueprint, root_id, start_day):
-	while len(items) < blueprint.target_action_count:
-		index = len(items)
-		start = start_day + timedelta(days=index // 5, hours=index % 5)
-		items.append(ActionBlueprintItem(
-			operation_id=f"create_blueprint_detail_{index:03d}",
-			action_name=f"{blueprint.title} Detail {index:03d}",
-			description="Additional concrete Action added to satisfy the blueprint target count.",
-			start_date=start,
-			end_date=start + timedelta(hours=1),
+			operation_id=safe_operation_id(f"template_{template.template_id}_{index + 1:03d}"),
+			action_name=name,
+			description=description,
+			start_date=start_date,
+			end_date=end_date,
 			is_group=False,
-			todo=True,
-			event=False,
-			parent_operation_id=root_id,
+			todo=template.todo,
+			event=template.event,
+			parent_operation_id=parent_operation_id,
+			status="Upcoming",
 		))
+	return items
 
 
-def render_blueprint_pattern(pattern, index, total, template_id, variables=None, context=None):
-	value = pattern or f"{template_id} {index}"
-	variables = variables or {}
-	context = context or {}
-	replacements = {
-		"{index}": str(index),
-		"{n}": str(index),
-		"{i}": str(index),
-		"{number}": str(index),
-		"{total}": str(total),
-		"{template_id}": template_id,
-	}
-	for key, replacement in replacements.items():
-		value = value.replace(key, replacement)
-	for placeholder in sorted(set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", value))):
-		choices = variables.get(placeholder) or []
-		replacement = context.get(placeholder) or (str(choices[(index - 1) % len(choices)]) if choices else default_blueprint_variable_value(placeholder, index))
-		value = value.replace("{" + placeholder + "}", replacement)
-	return value
+def variable_combinations(variables):
+	"""Return deterministic variable rows for template expansion."""
+	if not variables:
+		return []
+	keys = list(variables.keys())
+	max_length = max((len(values) for values in variables.values() if isinstance(values, list)), default=0)
+	rows = []
+	for index in range(max_length):
+		row = {}
+		for key in keys:
+			values = variables.get(key) or []
+			if values:
+				row[key] = values[index % len(values)]
+		rows.append(row)
+	return rows
 
 
-def default_blueprint_variable_value(name, index):
-	readable = re.sub(r"[_-]+", " ", name or "item").strip().title()
-	return f"{readable} {index}"
+def render_action_template_text(pattern, values, fallback=""):
+	"""Render a blueprint pattern without failing on missing variables."""
+	try:
+		return (pattern or fallback).format(**values)
+	except Exception:
+		return pattern or fallback
 
 
-def classify_large_action_domain(text):
-	lower = (text or "").lower()
-	if any(term in lower for term in ("study", "university", "subject", "test", "exam", "revision")):
-		return "study"
-	if any(term in lower for term in ("workout", "exercise", "gym", "routine")):
-		return "workout"
-	return "generic"
+def safe_operation_id(value):
+	"""Normalize blueprint IDs into execution-operation-safe identifiers."""
+	operation_id = re.sub(r"[^a-zA-Z0-9_]+", "_", str(value or "operation")).strip("_").lower()
+	return operation_id or "operation"
 
 
-def target_large_action_count(text, domain):
-	requested = extract_requested_action_count(text)
-	if requested:
-		return requested
-	lower = (text or "").lower()
-	if domain == "study":
-		if "daily" in lower or "detailed" in lower:
-			return 150
-		return 80
-	if domain == "workout":
-		if "exercise" in lower or "each day" in lower or "under" in lower:
-			return 35
-		return 21
-	if not any(term in lower for term in ("routine", "regime", "plan", "schedule", "program", "tree", "hierarchy", "daily", "weekly", "under", "parent")):
-		return 1
-	return 50
-
-
-def build_study_action_blueprint(text, target_count):
-	now = _now().replace(hour=8, minute=0, second=0, microsecond=0)
-	start_day = now + timedelta(days=1)
-	subjects = extract_study_subjects(text)
-	weeks = choose_study_week_count(text, target_count)
-	items: list[ActionBlueprintItem] = []
-	root_id = "create_study_regime_root"
-	items.append(ActionBlueprintItem(
-		operation_id=root_id,
-		action_name="Fake University Study Regime",
-		description=f"Top-level Action tree for a generated {len(subjects)}-subject study regime ending in test-writing milestones.",
-		start_date=start_day,
-		end_date=start_day + timedelta(weeks=weeks, hours=10),
-		is_group=True,
-		todo=False,
-		event=False,
-	))
-	for subject_index, subject in enumerate(subjects, start=1):
-		subject_id = f"create_subject_{subject_index:02d}_group"
-		items.append(ActionBlueprintItem(
-			operation_id=subject_id,
-			action_name=f"{subject}",
-			description=f"Subject parent for {subject}: learning, practice, revision, and test preparation.",
-			start_date=start_day,
-			end_date=start_day + timedelta(weeks=weeks, hours=9),
-			is_group=True,
-			todo=False,
-			event=False,
-			parent_operation_id=root_id,
-		))
-		for week in range(1, weeks + 1):
-			week_start = start_day + timedelta(weeks=week - 1)
-			week_id = f"create_subject_{subject_index:02d}_week_{week:02d}_group"
-			items.append(ActionBlueprintItem(
-				operation_id=week_id,
-				action_name=f"{subject} - Week {week}",
-				description=study_week_description(subject, week, weeks),
-				start_date=week_start,
-				end_date=week_start + timedelta(days=6, hours=9),
-				is_group=True,
-				todo=False,
-				event=False,
-				parent_operation_id=subject_id,
-			))
-	append_study_leaf_actions(items, subjects, weeks, target_count, start_day)
-	return ActionPlanBlueprint(
-		domain="study",
-		target_action_count=target_count,
-		items=items[:target_count],
-		assumptions=[
-			f"Generated {len(subjects)} fake university subjects.",
-			f"Used a {weeks}-week study horizon unless the prompt specified otherwise.",
-			"Used Action parent_operation_id references so sync can create a tree after parent records exist.",
-			"Group Actions hold structure; leaf Actions are concrete study, practice, revision, and test tasks.",
-		],
-	)
-
-
-def extract_study_subjects(text):
-	lower = (text or "").lower()
-	default_subjects = [
-		"Applied Mathematics",
-		"Computer Science",
-		"Cognitive Psychology",
-		"Academic Writing",
-		"Research Methods",
-	]
-	match = re.search(r"(?:subjects?|classes?)\s*(?:are|:)\s*([^\.\n]+)", text or "", flags=re.IGNORECASE)
-	if match:
-		parts = [part.strip(" .") for part in re.split(r"[,;]", match.group(1)) if part.strip(" .")]
-		if len(parts) >= 2:
-			return parts[:10]
-	count_match = re.search(r"\bfor\s+(\d+)\s+subjects?\b", lower) or re.search(r"\b(\d+)\s+subjects?\b", lower)
-	count = int(count_match.group(1)) if count_match else 5
-	while len(default_subjects) < count:
-		default_subjects.append(f"Elective Subject {len(default_subjects) + 1}")
-	return default_subjects[:max(1, min(count, 12))]
-
-
-def choose_study_week_count(text, target_count):
-	lower = (text or "").lower()
-	match = re.search(r"\b(\d+)\s+weeks?\b", lower)
-	if match:
-		return max(1, min(int(match.group(1)), 26))
-	if target_count >= 220:
-		return 10
-	if target_count >= 120:
-		return 8
-	if target_count >= 60:
-		return 6
-	return 4
-
-
-def study_week_description(subject, week, weeks):
-	if week == weeks:
-		return f"Final test-writing week for {subject}: timed practice, summary review, and mock exam completion."
-	if week >= max(1, weeks - 1):
-		return f"Revision week for {subject}: consolidate weak areas and move into test-style practice."
-	if week <= 2:
-		return f"Foundation week for {subject}: learn core concepts and establish notes."
-	return f"Development week for {subject}: deepen understanding through practice and review."
-
-
-def append_study_leaf_actions(items, subjects, weeks, target_count, start_day):
-	leaf_templates = [
-		("Concept Study", "Read notes, build a compact explanation, and list unclear points."),
-		("Practice Set", "Complete targeted exercises and mark errors for review."),
-		("Active Recall", "Use closed-book recall to test the week’s material."),
-		("Revision Pass", "Review mistakes, compress notes, and update the subject checklist."),
-		("Test Drill", "Complete a timed test-style drill and record weak areas."),
-	]
-	leaf_index = 0
-	while len(items) < target_count:
-		for subject_index, subject in enumerate(subjects, start=1):
-			for week in range(1, weeks + 1):
-				week_id = f"create_subject_{subject_index:02d}_week_{week:02d}_group"
-				for template_name, template_description in leaf_templates:
-					if len(items) >= target_count:
-						return
-					leaf_index += 1
-					day_offset = ((week - 1) * 7) + ((leaf_index - 1) % 6)
-					start = start_day + timedelta(days=day_offset, hours=9 + ((leaf_index - 1) % 4) * 2)
-					items.append(ActionBlueprintItem(
-						operation_id=f"create_{safe_operation_slug(subject)}_w{week:02d}_task_{leaf_index:03d}",
-						action_name=f"{subject} W{week}: {template_name}",
-						description=f"{template_description} Generated as part of a scalable university study regime.",
-						start_date=start,
-						end_date=start + timedelta(hours=1, minutes=30),
-						is_group=False,
-						todo=True,
-						event=False,
-						parent_operation_id=week_id,
-					))
-
-
-def build_workout_action_blueprint(text, target_count):
-	now = _now().replace(hour=7, minute=0, second=0, microsecond=0)
-	start_day = now + timedelta(days=1)
-	days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-	items: list[ActionBlueprintItem] = []
-	root_id = "create_workout_routine_root"
-	items.append(ActionBlueprintItem(
-		operation_id=root_id,
-		action_name="Workout Routine",
-		description="Top-level Action tree for the generated workout routine.",
-		start_date=start_day,
-		end_date=start_day + timedelta(days=7, hours=10),
-		is_group=True,
-		todo=False,
-		event=False,
-	))
-	for index, day in enumerate(days, start=1):
-		day_start = start_day + timedelta(days=index - 1)
-		day_id = f"create_workout_day_{index:02d}"
-		items.append(ActionBlueprintItem(
-			operation_id=day_id,
-			action_name=f"{day} Workout Plan",
-			description=f"Daily parent Action for {day}'s workout plan.",
-			start_date=day_start,
-			end_date=day_start + timedelta(hours=2),
-			is_group=True,
-			todo=False,
-			event=False,
-			parent_operation_id=root_id,
-		))
-	exercises = ["Warm-up", "Strength Block", "Conditioning", "Mobility", "Cooldown"]
-	leaf_index = 0
-	while len(items) < target_count:
-		for day_index, day in enumerate(days, start=1):
-			for exercise in exercises:
-				if len(items) >= target_count:
-					break
-				leaf_index += 1
-				start = start_day + timedelta(days=day_index - 1, minutes=15 * (leaf_index % 5))
-				items.append(ActionBlueprintItem(
-					operation_id=f"create_workout_task_{leaf_index:03d}",
-					action_name=f"{day}: {exercise}",
-					description=f"Complete the {exercise.lower()} portion of the {day} workout.",
-					start_date=start,
-					end_date=start + timedelta(minutes=30),
-					is_group=False,
-					todo=True,
-					event=False,
-					parent_operation_id=f"create_workout_day_{day_index:02d}",
-				))
-	return ActionPlanBlueprint(domain="workout", target_action_count=target_count, items=items[:target_count], assumptions=["Generated a routine parent, day parents, and concrete exercise child Actions."])
-
-
-def build_generic_action_blueprint(text, target_count):
-	now = _now().replace(hour=9, minute=0, second=0, microsecond=0)
-	start_day = now + timedelta(days=1)
-	items: list[ActionBlueprintItem] = []
-	root_id = "create_generated_action_plan_root"
-	items.append(ActionBlueprintItem(
-		operation_id=root_id,
-		action_name="Generated Action Plan",
-		description=f"Top-level container for generated Actions from request: {text}",
-		start_date=start_day,
-		end_date=start_day + timedelta(days=max(1, target_count // 5)),
-		is_group=True,
-		todo=False,
-		event=False,
-	))
-	for index in range(1, target_count):
-		start = start_day + timedelta(days=(index - 1) // 5, hours=(index - 1) % 5)
-		items.append(ActionBlueprintItem(
-			operation_id=f"create_generated_action_{index:03d}",
-			action_name=f"Generated Action {index:03d}",
-			description=f"Concrete generated Action {index} of {target_count - 1} from request: {text}",
-			start_date=start,
-			end_date=start + timedelta(hours=1),
-			is_group=False,
-			todo=True,
-			event=False,
-			parent_operation_id=root_id,
-		))
-	return ActionPlanBlueprint(domain="generic", target_action_count=target_count, items=items[:target_count], assumptions=["Generated one parent Action and concrete child Actions."])
-
-
-def compile_action_blueprint_execution_plan(text, blueprint):
+def compile_expanded_blueprint_to_execution_plan(text, blueprint):
+	"""Convert expanded Action blueprint items into atomic Action create operations."""
 	blueprint = ActionPlanBlueprint.model_validate(blueprint)
-	route = RouteOption(
-		route_id=f"action_{blueprint.domain}_blueprint",
-		outcome_type="plan",
-		description=f"Create a scalable {blueprint.domain} Action tree with {len(blueprint.items)} atomic create operations.",
-		expected_outcome="The execution bus receives one atomic doctype.create operation per Action record.",
-		system_objects=["Action"],
-		evidence=[Evidence(source="input", reference="natural language request", fact=text)],
-		risks=["Large bulk creates require grouped execution security approval before sync."],
-		reversibility="medium",
-		confidence=0.9,
-		score=0.9,
-	)
-	decisions = [
-		Decision(
-			decision_id="action_blueprint_route_decision",
-			question="Should this request use scalable blueprint generation instead of one model-generated operation list?",
-			conclusion=f"Yes. The request needs {len(blueprint.items)} Action operations, so the system compiled a blueprint into atomic operations.",
-			alternatives=["Ask the model to emit every operation in one response, which previously collapsed large plans into tiny samples."],
-			evidence=[Evidence(source="system", reference="large action blueprint", fact=f"Blueprint source={blueprint.source}, target={blueprint.target_action_count}, produced={len(blueprint.items)}.")],
-			confidence=0.92,
-		),
-		Decision(
-			decision_id="action_blueprint_compile_decision",
-			question="How should the Action records be represented for execution?",
-			conclusion="Create parent/group Actions first, then child todo Actions that reference parent operation IDs.",
-			alternatives=["Create flat Actions without hierarchy."],
-			evidence=[Evidence(source="system", reference="Action tree support", fact="The sync layer resolves same-plan operation_id references in Link/tree fields after parent creates succeed.")],
-			confidence=0.9,
-		),
-	]
-	operations = [action_blueprint_item_to_create_operation(item) for item in blueprint.items]
-	return ExecutionPlan(
-		plan_id=str(uuid4()),
-		problem=ProblemBreakdown(
-			goal=text,
-			assumptions=blueprint.assumptions,
-			information_needed=[],
-		),
-		routes_considered=[route],
-		chosen_route_id=route.route_id,
-		decisions=decisions,
-		operations=normalize_plan_operation_dependencies(operations),
-		success_criteria=[SuccessCriterion(
-			description="Large Action tree was created at requested scale.",
-			check="Inspect the execution sync report and count successful Action create operations.",
-			expected_result=f"At least {blueprint.target_action_count} Action create operations were generated and approved operations synced.",
-		)],
-	)
-
-
-def action_blueprint_item_to_create_operation(item):
-	fields = {
-		"action_name": item.action_name,
-		"description": item.description,
-		"start_date": item.start_date.isoformat(),
-		"end_date": item.end_date.isoformat(),
-		"status": item.status,
-		"todo": bool(item.todo),
-		"event": bool(item.event),
-		"is_group": bool(item.is_group),
-	}
-	if item.parent_operation_id:
-		fields["parent_action"] = item.parent_operation_id
-		fields["ancestor"] = item.parent_operation_id
-	return CreateRecord(
-		operation_id=item.operation_id,
-		decision_id="action_blueprint_compile_decision",
-		description=f"Create Action '{item.action_name}'.",
-		doctype="Action",
-		fields=fields,
-	)
-
-
-def safe_operation_slug(value):
-	slug = re.sub(r"[^a-z0-9]+", "_", (value or "action").lower()).strip("_")
-	return slug or "action"
-
-
-def should_use_deterministic_create_delete_action_plan(text):
-	lower = (text or "").lower()
-	return (
-		("todo" in lower or "task" in lower or "action" in lower)
-		and any(term in lower for term in ("create", "add", "make"))
-		and "delete" in lower
-		and "random" in lower
-	)
-
-
-def build_deterministic_create_delete_action_plan(text):
-	now = _now().replace(second=0, microsecond=0)
-	create_count = requested_count_after_terms(text, ("create", "add", "make"), default=1)
-	delete_count = requested_count_after_terms(text, ("delete", "remove"), default=1)
-	todo_mode = "todo" in (text or "").lower() and "action" not in (text or "").lower()
-	targets = choose_deterministic_action_delete_targets(delete_count, todo_only=todo_mode)
-	object_label = "todo" if todo_mode else "action"
-	route = RouteOption(
-		route_id=f"create_{create_count}_random_{object_label}s_then_delete_{delete_count}_random_{object_label}s",
-		outcome_type="plan",
-		description=f"Create {create_count} AI-chosen {object_label} record(s) and delete {len(targets)} AI-chosen existing {object_label} record(s).",
-		expected_outcome="The requested creates and concrete delete targets are passed to security for approval before sync.",
-		system_objects=["Action"],
-		evidence=[Evidence(
-			source="input",
-			reference="natural language request",
-			fact=f"The user explicitly asked for random create/delete Action operations. Parsed create_count={create_count}, delete_count={delete_count}.",
-		)],
-		risks=["Delete is destructive and must be approved at the execution bus security stage."],
-		reversibility="low",
+	decision = Decision(
+		decision_id="compile_action_blueprint_decision",
+		question="How should the Action blueprint become executable operations?",
+		conclusion="Create one Action record per expanded blueprint item, preserving parent operation references for hierarchy.",
+		alternatives=["Ask for more clarification", "Use one flat generated Action list"],
+		evidence=[Evidence(source="system", reference="Action blueprint compiler", fact=f"Expanded blueprint contains {len(blueprint.items)} Action item(s).")],
 		confidence=0.86,
-		score=0.86,
 	)
-	decisions = [
-		Decision(
-			decision_id="deterministic_route_decision",
-			question="Can the system proceed without clarification?",
-			conclusion="Yes. The word random authorizes the AI to choose reasonable concrete Action values and deletion candidates, with security approval before sync.",
-			alternatives=["Ask the user to name exact records, but that contradicts the requested random workflow."],
-			evidence=[Evidence(source="input", reference="random todo request", fact=text)],
-			confidence=0.86,
-		),
-		Decision(
-			decision_id="deterministic_implementation_decision",
-			question="Which concrete operations should be sent to the execution bus?",
-			conclusion=f"Create {create_count} Action record(s) and delete {len(targets)} selected existing Action record(s).",
-			alternatives=["Only create a todo if no existing todo can be found for deletion."],
-			evidence=[Evidence(source="system", reference="Action", fact="Actions and todos are stored as Action records.")],
-			confidence=0.84,
-		),
-	]
-	operations: list[ExecutionOperation] = []
-	for index in range(create_count):
-		start = now + timedelta(hours=index + 1)
-		end = start + timedelta(hours=1)
+	operations = []
+	seen_ids = set()
+	for item in blueprint.items:
+		operation_id = unique_operation_id(item.operation_id, seen_ids)
+		fields = {
+			"action_name": item.action_name,
+			"description": item.description,
+			"start_date": item.start_date,
+			"end_date": item.end_date,
+			"status": item.status or "Upcoming",
+			"todo": item.todo,
+			"event": item.event,
+			"is_group": item.is_group,
+		}
+		dependencies = []
+		if item.parent_operation_id:
+			parent_operation_id = safe_operation_id(item.parent_operation_id)
+			fields["parent_action"] = parent_operation_id
+			dependencies.append(OperationDependency(target="operation", operation_id=parent_operation_id))
 		operations.append(CreateRecord(
-			operation_id=f"create_random_{object_label}_{index + 1}",
-			decision_id="deterministic_implementation_decision",
-			description=f"Create AI-chosen random {object_label} {index + 1} of {create_count}.",
+			operation_id=operation_id,
+			decision_id=decision.decision_id,
+			description=f"Create Action '{item.action_name}'.",
 			doctype="Action",
-			fields={
-				"action_name": f"Random {object_label.title()} {now.strftime('%H%M')}-{index + 1:02d}",
-				"description": f"Random {object_label} {index + 1} of {create_count} created from request: {text}",
-				"start_date": start.isoformat(),
-				"end_date": end.isoformat(),
-				"todo": bool(todo_mode),
-				"event": False,
-				"status": "Upcoming",
-			},
-		))
-	for index, target in enumerate(targets):
-		operations.append(DeleteRecord(
-			operation_id=f"delete_random_{object_label}_{index + 1}",
-			decision_id="deterministic_implementation_decision",
-			description=f"Delete AI-selected existing {object_label} {index + 1} of {len(targets)}: '{target.get('action_name') or target.get('name')}'.",
-			doctype="Action",
-			record_id=target["name"],
-			expected_modified=_coerce_datetime(target.get("modified")),
-		))
-	if not targets and delete_count:
-		decisions.append(Decision(
-			decision_id="deterministic_no_delete_target",
-			question="Could the delete operation be made concrete?",
-			conclusion=f"No existing {object_label} was found, so no delete operation was generated.",
-			alternatives=[],
-			evidence=[Evidence(source="system", reference="Action", fact="No existing delete candidate was found.")],
-			confidence=1.0,
+			fields=fields,
+			dependencies=dependencies,
 		))
 	return ExecutionPlan(
 		plan_id=str(uuid4()),
 		problem=ProblemBreakdown(
 			goal=text,
-			assumptions=["Random means the AI may choose reasonable concrete Action values and deletion candidates."],
-			information_needed=[],
+			assumptions=[*blueprint.assumptions, "Preserve blueprint hierarchy through same-plan operation dependencies."],
 		),
-		routes_considered=[route],
-		chosen_route_id=route.route_id,
-		decisions=decisions,
+		routes_considered=[RouteOption(
+			route_id="compile_action_blueprint",
+			outcome_type="create",
+			description="Compile the Action blueprint into execution-bus create operations.",
+			expected_outcome="The sync layer creates the Action tree and resolves same-plan parent links.",
+			system_objects=["Action"],
+			evidence=[Evidence(source="system", reference="Action blueprint compiler", fact=f"Compiled {len(operations)} Action operation(s).")],
+			missing_information=[],
+			reversibility="medium",
+			risks=["Large create batches require security review before sync."],
+			confidence=0.86,
+			score=0.86,
+		)],
+		chosen_route_id="compile_action_blueprint",
+		decisions=[decision],
 		operations=operations,
 		success_criteria=[SuccessCriterion(
-			description="Approved todo operations complete.",
-			check="Inspect the execution sync report and Action records.",
-			expected_result="Approved operations succeed and denied operations are skipped.",
+			description="Verify all blueprint Action operations were attempted.",
+			check="Compare execution report records to compiled operation IDs.",
+			expected_result=f"{len(operations)} create operation(s) attempted with per-operation records.",
 		)],
 	)
 
 
-def requested_count_after_terms(text, terms, default=1):
-	lower = (text or "").lower()
-	for term in terms:
-		match = re.search(rf"\b{re.escape(term)}\s+(\d+)\b", lower)
-		if match:
-			return max(1, min(int(match.group(1)), 50))
-	return default
+def unique_operation_id(operation_id, seen_ids):
+	base_id = safe_operation_id(operation_id)
+	unique_id = base_id
+	index = 2
+	while unique_id in seen_ids:
+		unique_id = f"{base_id}_{index}"
+		index += 1
+	seen_ids.add(unique_id)
+	return unique_id
 
 
-def choose_deterministic_action_delete_targets(count, todo_only=False):
+def normalize_action_blueprint_from_information_map(text, blueprint):
+	blueprint = ActionImplementationBlueprint.model_validate(blueprint)
+	map_data = extract_information_map_from_text(text)
+	if not map_data:
+		return blueprint
+	requirements = [
+		requirement for requirement in map_data.get("implementation_requirements") or []
+		if requirement.get("must_preserve", True)
+	]
+	missing_requirements = [
+		requirement for requirement in requirements
+		if not blueprint_preserves_information_requirement(blueprint, requirement)
+	]
+	if not missing_requirements:
+		return blueprint
+	blueprint_dict = blueprint.model_dump()
+	blueprint_dict["implementation_notes"] = list(blueprint_dict.get("implementation_notes") or [])
+	for requirement in missing_requirements:
+		blueprint_dict["implementation_notes"].append(
+			f"Information-map requirement to preserve: {requirement.get('description')} Hint: {requirement.get('blueprint_hint', '')}"
+		)
+	return ActionImplementationBlueprint.model_validate(blueprint_dict)
+
+
+def extract_information_map_from_text(text):
+	marker = "Design information map:\n"
+	if marker not in (text or ""):
+		return None
+	map_text = text.split(marker, 1)[1].split("\n\nProgressive design interview answers:", 1)[0]
+	try:
+		return json.loads(map_text)
+	except Exception:
+		return None
+
+
+
+def infer_focus_cycle_from_text(text):
+	lower_text = (text or "").lower()
+	focuses = []
+	for label, terms in {
+		"Legs": ("legs", "leg"),
+		"Cardio": ("cardio", "conditioning", "endurance"),
+		"Upper Body": ("upper", "push", "pull", "arms", "chest", "back"),
+		"Core": ("core", "abs"),
+		"Mobility": ("mobility", "stretch", "recovery"),
+	}.items():
+		if any(term in lower_text for term in terms):
+			focuses.append(label)
+	if not focuses and any(term in lower_text for term in ("focus", "cycle", "cycling")):
+		focuses = ["Legs", "Cardio", "Upper Body", "Core", "Mobility"]
+	if not focuses:
+		return None
+	return {
+		"focuses": focuses,
+		"cadence_days": 2 if any(term in lower_text for term in ("every 2 days", "every two days", "2 days")) else None,
+	}
+
+
+def infer_schedule_pattern_from_text(text):
+	lower_text = (text or "").lower()
+	pattern = {}
+	if "week" in lower_text:
+		pattern["period"] = "week"
+	if any(term in lower_text for term in ("every 2 days", "every two days", "2 days")):
+		pattern["cadence"] = "rotate focus every 2 days"
+	if "copy and paste" in lower_text:
+		pattern["template_application"] = "copy template into each scheduled day/session"
+	if any(term in lower_text for term in ("right time", "when each", "figure out when")):
+		pattern["time_selection"] = "choose practical times from the mapped structure"
+	return pattern or None
+
+
+def build_design_field_intents(prompt, scope, answers, assumptions, unknowns):
+	base_intents = [
+		DesignFieldIntent(doctype="Action", fieldname="action_name", label="Name", value_strategy="assumed", value="generated_from_map", reason="Every Action needs a readable name; naming assumptions are tracked in the map.", confidence=0.82),
+		DesignFieldIntent(doctype="Action", fieldname="description", label="Description", value_strategy="assumed", value="generated_from_scope_and_template", reason="Descriptions should explain the purpose of each generated Action.", confidence=0.78),
+		DesignFieldIntent(doctype="Action", fieldname="start_date", label="Start Date", value_strategy="assumed", value="scheduled_by_blueprint", reason="Generated Actions need approximate timing; timing assumptions are mapped.", confidence=0.72),
+		DesignFieldIntent(doctype="Action", fieldname="end_date", label="End Date", value_strategy="assumed", value="scheduled_by_blueprint", reason="End dates follow duration assumptions from the blueprint.", confidence=0.72),
+		DesignFieldIntent(doctype="Action", fieldname="status", label="Status", value_strategy="assumed", value="Upcoming", reason="New planned Actions start as Upcoming.", confidence=0.86),
+		DesignFieldIntent(doctype="Action", fieldname="todo", label="Todo", value_strategy="assumed", value="true_for_leaf_false_for_groups", reason="Concrete Actions should be executable todos while containers should not.", confidence=0.88),
+		DesignFieldIntent(doctype="Action", fieldname="event", label="Event", value_strategy="assumed", value=False, reason="Generated structures are todos unless the prompt requests fixed calendar events.", confidence=0.84),
+		DesignFieldIntent(doctype="Action", fieldname="is_group", label="Is Group", value_strategy="assumed", value="true_for_containers", reason="Hierarchy needs group/container Actions.", confidence=0.88),
+		DesignFieldIntent(doctype="Action", fieldname="parent_action", label="Parent Action", value_strategy="assumed", value="operation_id_reference", reason="The sync layer resolves parent operation IDs into record names.", confidence=0.9),
+	]
+	return merge_doctype_field_intents("Action", base_intents, prompt, scope)
+
+
+def merge_doctype_field_intents(doctype, base_intents, prompt, scope):
+	intents_by_field = {intent.fieldname: intent for intent in base_intents}
+	for field in get_design_map_doctype_fields(doctype):
+		fieldname = field.get("fieldname")
+		if not fieldname or fieldname in intents_by_field:
+			continue
+		strategy = design_field_strategy_for_field(field, prompt, scope)
+		if strategy["value_strategy"] == "skip":
+			continue
+		intents_by_field[fieldname] = DesignFieldIntent(
+			doctype=doctype,
+			fieldname=fieldname,
+			label=field.get("label"),
+			value_strategy=strategy["value_strategy"],
+			value=strategy.get("value"),
+			reason=strategy["reason"],
+			confidence=strategy["confidence"],
+		)
+	return list(intents_by_field.values())
+
+
+def get_design_map_doctype_fields(doctype):
 	try:
 		import frappe
 
-		filters = {"todo": 1} if todo_only else {}
-		records = frappe.get_list(
-			"Action",
-			filters=filters,
-			fields=["name", "action_name", "modified"],
-			order_by="modified asc",
-			limit_page_length=max(1, min(int(count), 50)),
-		)
-		return records
-	except Exception as error:
-		logfire.warning("failed to choose deterministic action delete targets", error=str(error))
+		meta = frappe.get_meta(doctype)
+		return [
+			{
+				"fieldname": field.fieldname,
+				"label": field.label,
+				"fieldtype": field.fieldtype,
+				"options": field.options,
+				"required": bool(field.reqd),
+				"read_only": bool(field.read_only),
+				"default": field.default,
+			}
+			for field in meta.fields
+			if field.fieldname and not field.read_only
+		]
+	except Exception:
 		return []
 
 
-def deterministic_information_answer_for_supported_request(final_input):
-	text = final_input if isinstance(final_input, str) else getattr(final_input, "input", "")
-	lower = (text or "").lower()
-	intent = detect_requested_intents(text)
-	if intent["mutation_intents"]:
-		return None
-	if not any(term in lower for term in ("search", "find", "show", "list", "what", "check")):
-		return None
-	if not any(term in lower for term in ("action", "actions", "todo", "todos", "task", "tasks")):
-		return None
-	return search_actions_for_information_answer(text)
-
-
-def search_actions_for_information_answer(text):
-	try:
-		import frappe
-
-		query = extract_action_search_query(text)
-		filters = {"todo": 1} if "todo" in (text or "").lower() else {}
-		or_filters = None
-		if query:
-			or_filters = [
-				["Action", "action_name", "like", f"%{query}%"],
-				["Action", "description", "like", f"%{query}%"],
-			]
-		records = frappe.get_list(
-			"Action",
-			filters=filters,
-			or_filters=or_filters,
-			fields=_action_summary_fields(),
-			order_by="modified desc",
-			limit_page_length=20,
-		)
-		facts = [
-			Evidence(
-				source="system",
-				reference=f"Action {record.get('name')}",
-				fact=f"{record.get('action_name') or record.get('name')} | status={record.get('status')} | start={record.get('start_date')} | todo={record.get('todo')} | event={record.get('event')}",
-			)
-			for record in records
-		]
-		if not facts:
-			facts = [Evidence(source="system", reference="Action search", fact="No matching Action records found.")]
-		return InformationAnswer(results=[InformationResult(
-			request_id="deterministic_action_search",
-			status="complete",
-			answer=f"Found {len(records)} matching Action record(s).",
-			requested_output="List matching Action records for the user.",
-			strategy=["Detected read-only Action search request.", "Queried Action records with Frappe permissions.", "Returned matching records as final console output."],
-			facts=facts,
-			missing_information=[],
-			confidence=0.95,
-		)])
-	except Exception as error:
-		return InformationAnswer(results=[InformationResult(
-			request_id="deterministic_action_search",
-			status="partial",
-			answer="Action search could not be completed.",
-			requested_output="List matching Action records for the user.",
-			strategy=["Detected read-only Action search request.", "Tried to query Action records."],
-			facts=[Evidence(source="system", reference="Action search error", fact=str(error))],
-			missing_information=["Retry after the system/database is available."],
-			confidence=0.2,
-		)])
-
-
-def extract_action_search_query(text):
-	lower = (text or "").lower()
-	for marker in ("search for", "find", "called", "named", "containing", "about"):
-		if marker in lower:
-			return (text[lower.index(marker) + len(marker):]).strip(" .:;\n\t'") or None
-	return None
-
-
-def run_preview_clarification_stage(state):
-	clarification = deterministic_clarification_for_exact_request(state.input.input)
-	if clarification:
-		state.clarification = clarification
-		state.user_clarification = None
-		state.stage = "route_selection"
-		return clarification
-
-	prompt = (
-		f"Original input:\n{state.input.model_dump_json()}"
-		f"\n\nSystem context:\n{to_jsonable_python(SYSTEM_CONTEXT)}"
-		f"\n\nCurrent datetime:\n{_now().isoformat()}"
-		f"\n\nInformation already collected:\n{to_jsonable_python(state.information)}"
-		"\n\nPreview pipeline: clarify the request once and return the stage result."
-	)
-	result = _run_agent_sync_with_retry(
-		get_clarification_agent(),
-		prompt=prompt,
-		deps=state,
-		conversation_id=state.orchestration_id,
-	)
-	if isinstance(result.output, UserClarification):
-		return run_preview_assumption_review(state, result.output)
-	state.clarification = result.output
-	state.user_clarification = None
-	state.stage = "route_selection"
-	return result.output
-
-
-def deterministic_clarification_for_exact_request(text):
-	text = text or ""
-	lower_text = text.lower()
-	generated_plan = deterministic_clarification_for_generated_structure_request(text)
-	if generated_plan:
-		return generated_plan
-	has_exact_date = bool(re.search(r"\b20\d{2}-\d{2}-\d{2}\b", text))
-	has_time = bool(re.search(r"\b\d{1,2}:\d{2}\b", text))
-	has_action_intent = any(term in lower_text for term in ("create", "add", "delete", "update", "check", "planned"))
-	if not (has_exact_date and has_time and has_action_intent):
-		return None
-	return ClarificationResult(
-		problem=ProblemBreakdown(
-			goal=text,
-			assumptions=[],
-			information_needed=[],
-		),
-		evidence=[Evidence(source="input", reference="exact request", fact="The request includes exact dates, times, and action intent.")],
-		confidence=0.95,
-	)
-
-
-def deterministic_clarification_for_generated_structure_request(text):
-	lower_text = (text or "").lower()
-	if not any(term in lower_text for term in ("create", "make", "build", "design", "plan")):
-		return None
-	if not any(term in lower_text for term in ("routine", "workout", "study plan", "meal plan", "schedule", "actions")):
-		return None
-	if not any(term in lower_text for term in ("action", "actions", "todo", "calendar", "plan action")):
-		return None
-	assumptions = []
-	if "workout" in lower_text:
-		assumptions.extend([
-			"Use a balanced general-fitness workout routine because no specific fitness goal was provided.",
-			"Use bodyweight-friendly exercises unless the prompt names equipment.",
-		])
-	if "under" in lower_text or "parent" in lower_text or "daily" in lower_text:
-		assumptions.append("Represent the requested structure with parent Action records and child Action records linked through parent fields.")
-	return ClarificationResult(
-		problem=ProblemBreakdown(
-			goal=text,
-			assumptions=assumptions or ["Proceed with reasonable defaults because the user asked the AI to generate the plan."],
-			information_needed=[],
-		),
-		evidence=[Evidence(
-			source="input",
-			reference="generated structure request",
-			fact="The user asked the AI to create a structured plan, so missing preferences are assumptions rather than blockers.",
-		)],
-		confidence=0.84,
-	)
-
-
-def build_progressive_design_question_plan(prompt, answers=None):
-	answers = answers or []
-	scope = classify_design_scope(prompt, answers)
-	scope["answers"] = answers
-	if scope["scope_type"] == "simple_action":
-		return None
-	inferred_answers = infer_design_answers(prompt, scope, answers)
-	combined_answers = merge_design_answers(answers, inferred_answers)
-	scope["answers"] = combined_answers
-	scope["likely_action_count_range"] = estimate_design_scale(scope["scope_type"], scope["domain"], combined_answers)
-	questions = identify_design_questions(prompt, scope, combined_answers)
-	return DesignQuestionPlan(
-		scope_type=scope["scope_type"],
-		domain=scope["domain"],
-		likely_action_count_range=scope["likely_action_count_range"],
-		questions=questions,
-		inferred_answers=inferred_answers,
-		system_assumptions=build_system_assumptions_for_design(scope, answers),
-	)
+def design_field_strategy_for_field(field, prompt, scope):
+	fieldname = field.get("fieldname")
+	fieldtype = field.get("fieldtype")
+	label = (field.get("label") or fieldname or "").lower()
+	lower_prompt = (prompt or "").lower()
+	if field.get("required"):
+		return {"value_strategy": "ask", "value": None, "reason": f"Required field {fieldname} must be resolved before sync if no default applies.", "confidence": 0.6}
+	if fieldtype in {"Data", "Small Text", "Text", "Long Text"} and any(term in label for term in ("description", "name", "title")):
+		return {"value_strategy": "assumed", "value": "generated_from_map", "reason": f"Text field {fieldname} can be filled from the information map.", "confidence": 0.68}
+	if "calendar" in lower_prompt and fieldtype in {"Datetime", "Date"}:
+		return {"value_strategy": "ask", "value": None, "reason": f"Calendar timing field {fieldname} may need user timing specifics.", "confidence": 0.62}
+	return {"value_strategy": "skip", "reason": f"Field {fieldname} is not relevant enough for this map.", "confidence": 0.5}
 
 
 def classify_design_scope(prompt, answers=None):
@@ -4569,10 +4454,57 @@ def _is_simple_batch_request(text):
 		return False
 	return True
 
+
+def extract_requested_action_count(text):
+	match = re.search(r"\b(?:at\s+least|about|around|roughly|approximately)?\s*(\d{1,4})\s+(?:actions?|todos?|records?|items?)\b", text or "")
+	if not match:
+		return None
+	return int(match.group(1))
+
+
+def design_answer_for(answers, question_id, *, include_inferred=True):
+	for answer in answers or []:
+		if answer.get("question_id") == question_id:
+			if not include_inferred and answer.get("inferred"):
+				continue
+			return str(answer.get("answer") or "")
+	return ""
+
+
+def design_answer_text(answers):
+	return " ".join(str(answer.get("answer") or "") for answer in answers or []).lower()
+
+
+def design_assumption_review_requested(prompt, answers=None):
+	text = " ".join([prompt or "", design_answer_text(answers)]).lower()
+	return any(phrase in text for phrase in (
+		"ask about rest of the assumptions",
+		"ask about the rest of the assumptions",
+		"ask the rest of the assumptions",
+		"ask about assumptions",
+		"ask all assumptions",
+		"ask me assumptions",
+		"ask me the assumptions",
+		"ask me the rest",
+		"don't assume",
+		"do not assume",
+		"no assumptions",
+		"let me decide assumptions",
+		"review assumptions",
+		"rest of the assumption",
+		"rest of assumptions",
+	))
+
+
 def estimate_design_scale(scope_type, domain, answers=None):
 	answers = answers or []
 	answer_text = " ".join(str(answer.get("answer", "")) for answer in answers).lower()
+	requested_count = extract_requested_action_count(answer_text)
+	if requested_count:
+		return (requested_count, max(requested_count, int(requested_count * 1.25)))
 	if domain == "study":
+		if "300" in answer_text:
+			return (300, 420)
 		if "150" in answer_text:
 			return (150, 320)
 		if "100" in answer_text:
@@ -4618,87 +4550,30 @@ def infer_design_answers(prompt, scope, existing_answers=None):
 			"reason": reason,
 		})
 
-	if scope["domain"] == "study":
-		detail_answer = design_answer_for(existing_answers, "study_detail_level").lower()
-		minimum_size_answer = design_answer_for(existing_answers, "study_minimum_size").lower()
-		subject_answer = design_answer_for(existing_answers, "study_subjects").lower()
-		if any(term in lower_prompt for term in ("until", "test", "tests", "exam", "exams", "writing tests")):
-			add(
-				"study_scope",
-				"scope",
-				"What should this study setup cover?",
-				"Study plus revision plus test-writing milestones",
-				"The prompt explicitly says the regime runs until writing tests.",
-			)
+	if any(term in lower_prompt for term in ("until", "test", "tests", "exam", "exams", "writing tests")):
 		add(
-			"study_scheduling_assumptions",
-			"assumptions",
-			"Should scheduling assumptions be made?",
-			"Make reasonable assumptions",
-			"The user asked the system to design the regime, so default scheduling assumptions should be made unless contradicted.",
+			"explicit_endpoint",
+			"scope",
+			"What endpoint should the generated system reach?",
+			"Include the requested endpoint or milestone stage.",
+			"The prompt explicitly describes the endpoint, so this can be carried into the map without another question.",
 		)
-		if (detail_answer or minimum_size_answer) and not subject_answer and "fake" in lower_prompt:
-			add(
-				"study_subjects",
-				"specifics",
-				"Should subjects be invented or provided?",
-				"Invent fake subjects",
-				"After the detail level is known, the word fake is enough to infer invented subjects unless the user says otherwise.",
-			)
-		if detail_answer or minimum_size_answer:
-			if minimum_size_answer and not detail_answer:
-				if "50" in minimum_size_answer:
-					inferred_detail = "Medium weekly plan"
-					detail_reason = "At least 50 Actions implies more than a lightweight outline but not necessarily a full daily system."
-				else:
-					inferred_detail = "Detailed daily system"
-					detail_reason = "A minimum of 100+ Actions requires a detailed daily-style regime to justify the operation count."
-				add(
-					"study_detail_level",
-					"extent",
-					"How detailed should the study regime be?",
-					inferred_detail,
-					detail_reason,
-				)
-			add("study_horizon", "extent", "How long should the regime run?", "6 weeks", "Once size/detail is known, 6 weeks is a reasonable default for fake test-preparation unless the user gives another duration.")
-			add(
-				"study_structure",
-				"structure",
-				"Which Action hierarchy should be used?",
-				"Hybrid",
-				"For multi-subject test preparation, hybrid university → subject → week/test branches is the most inspectable default.",
-			)
-			add(
-				"study_naming_rules",
-				"specifics",
-				"Do you want naming rules?",
-				"Use clear generated names",
-				"Naming rules are useful but should not block generation after the main size/detail decision is known.",
-			)
-		if "detailed daily" in detail_answer or "100" in minimum_size_answer or "150" in minimum_size_answer:
-			add(
-				"study_daily_workload",
-				"extent",
-				"How much daily workload should be assumed?",
-				"2 hours/day",
-				"Daily workload affects scheduling but can default after the user chose detailed daily.",
-			)
-
-	elif scope["domain"] == "workout":
-		if any(term in lower_prompt for term in ("routine", "plan", "weekly", "each day", "daily")):
-			add("workout_scope", "scope", "How large should the workout plan be?", "Full weekly routine", "The prompt asks for a workout routine/plan, which implies a full weekly routine.")
-		if any(term in lower_prompt for term in ("under", "each day", "daily", "parent", "child", "actions")):
-			add("workout_detail_level", "extent", "How detailed should workouts be?", "Detailed exercise-by-exercise plan", "The prompt asks for daily workout Actions under day parents.")
-		else:
-			add("workout_detail_level", "extent", "How detailed should workouts be?", "Daily plan", "No exercise-level detail was requested, so daily planning is sufficient.")
-		add("workout_goal", "scope", "What goal should workouts optimize for?", "General fitness", "No specific fitness goal was provided, so general fitness is the safest default.")
-		add("workout_equipment", "assumptions", "What equipment should be assumed?", "Bodyweight only", "No equipment was named, so bodyweight-only is the least-assumptive default.")
+	requested_count = extract_requested_action_count(lower_prompt)
+	if requested_count:
 		add(
-			"workout_structure",
-			"structure",
-			"What Action hierarchy should be used?",
-			"Yes",
-			"A workout routine maps cleanly to routine parent → day parent Actions → exercise child Actions unless the prompt asks for a different structure.",
+			"explicit_requested_count",
+			"extent",
+			"How many Actions should be generated?",
+			f"About {requested_count} Actions",
+			"The prompt explicitly includes an Action count.",
+		)
+	if "random" in lower_prompt:
+		add(
+			"random_naming_allowed",
+			"specifics",
+			"May generated names be random?",
+			"Use generated random names where the request says random.",
+			"The prompt explicitly permits random generation.",
 		)
 
 	return inferred
@@ -4714,247 +4589,711 @@ def merge_design_answers(explicit_answers, inferred_answers):
 	return merged
 
 
-def identify_design_questions(prompt, scope, answers=None):
+def build_progressive_design_question_plan(prompt, answers=None):
 	answers = answers or []
-	answered = {answer.get("question_id") for answer in answers}
-	if scope["domain"] == "study":
-		questions = study_design_questions(scope, prompt)
-	elif scope["domain"] == "workout":
-		questions = workout_design_questions(scope, prompt)
-	else:
-		questions = generic_design_questions(scope, prompt)
-	return [question for question in questions if question.question_id not in answered]
+	scope = classify_design_scope(prompt, answers)
+	inferred_answers = infer_design_answers(prompt, scope, answers)
+	combined_answers = merge_design_answers(answers, inferred_answers)
+	scope = classify_design_scope(prompt, combined_answers)
+	scope["answers"] = combined_answers
+	information_map = build_design_information_map(prompt, scope, combined_answers)
+	planner_decision = run_design_question_planner(prompt, scope, combined_answers, information_map)
+	information_map = apply_design_question_planner_decision(information_map, planner_decision)
+	questions = [planner_decision.question] if planner_decision.status == "ask" and planner_decision.question else []
+	return DesignQuestionPlan(
+		scope_type=scope["scope_type"],
+		domain=scope["domain"],
+		likely_action_count_range=tuple(scope["likely_action_count_range"]),
+		questions=questions,
+		inferred_answers=inferred_answers,
+		system_assumptions=build_system_assumptions_for_design(scope, combined_answers),
+		information_map=information_map,
+	)
 
 
-def study_design_questions(scope, prompt=None):
-	lower_prompt = (prompt or "").lower()
-	questions = []
-	if has_incomplete_at_least_constraint(lower_prompt):
-		questions.append(DesignQuestion(
-			question_id="study_minimum_size",
-			phase="extent",
-			question="You wrote 'at least' but did not finish the size requirement. What minimum size should I build: at least 50 Actions, at least 100 Actions, or at least 150 Actions?",
-			reason="A minimum size requirement directly controls how many atomic create operations the implementation should generate.",
-			options=["At least 50 Actions", "At least 100 Actions", "At least 150 Actions"],
-			default_assumption="At least 50 Actions",
+def run_design_question_planner(prompt, scope, answers, information_map):
+	"""Ask the AI planner whether the information map needs one more user answer."""
+	if scope.get("scope_type") == "simple_action":
+		return DesignQuestionPlannerDecision(
+			status="ready",
+			reasoning_summary="Simple action request does not need a design interview.",
+			complexity_assessment="low",
+			estimated_total_questions=0,
+			dimension_reviews=[
+				DesignMapDimensionReview(dimension="scope", status="resolved", impact="low", reason="Simple action request has direct scope."),
+				DesignMapDimensionReview(dimension="scale", status="resolved", impact="low", reason="Simple action request has small scale."),
+				DesignMapDimensionReview(dimension="structure", status="resolved", impact="low", reason="No broad structure is needed."),
+				DesignMapDimensionReview(dimension="relationships", status="resolved", impact="low", reason="No relationship design is needed."),
+				DesignMapDimensionReview(dimension="timing", status="assumed", impact="low", reason="Timing can be inferred by the implementation stage if relevant."),
+				DesignMapDimensionReview(dimension="naming", status="assumed", impact="low", reason="Name can be inferred from the prompt."),
+				DesignMapDimensionReview(dimension="content", status="resolved", impact="low", reason="Prompt content is sufficient for one action."),
+				DesignMapDimensionReview(dimension="fields", status="assumed", impact="low", reason="Default Action field strategy is sufficient."),
+				DesignMapDimensionReview(dimension="assumptions", status="assumed", impact="low", reason="Only low-impact defaults remain."),
+			],
+		)
+	try:
+		result = _run_agent_sync_with_retry(
+			get_design_question_planner_agent(),
+			prompt=build_design_question_planner_prompt(prompt, scope, answers, information_map),
+			deps=None,
+			conversation_id=str(uuid4()),
+		)
+	except Exception:
+		return fallback_design_question_planner_decision(prompt, scope, answers, information_map)
+	try:
+		return enforce_design_question_planner_boundaries(prompt, scope, answers, information_map, result.output)
+	except ModelRetry:
+		return fallback_design_question_planner_decision(prompt, scope, answers, information_map)
+
+
+def enforce_design_question_planner_boundaries(prompt, scope, answers, information_map, planner_decision):
+	"""Validate planner output without deciding the interview for it."""
+	planner_decision = DesignQuestionPlannerDecision.model_validate(planner_decision)
+	if planner_decision.status == "ask":
+		return planner_decision
+	unresolved_reviews = [
+		review
+		for review in planner_decision.dimension_reviews
+		if review.status == "needs_user" and review.impact in {"high", "critical"}
+	]
+	if unresolved_reviews:
+		raise ModelRetry("Planner marked the map ready while high-impact dimensions still need the user.")
+	if broad_design_scope(scope) and not planner_ready_has_core_dimension_coverage(planner_decision):
+		raise ModelRetry(
+			"Broad design maps need explicit dimension review coverage for scope/scale, structure/relationships, "
+			"timing, naming, content, fields, and assumptions before status='ready'."
+		)
+	if broad_design_scope(scope) and weak_answers_for_broad_design(answers):
+		raise ModelRetry(
+			"A short answer without explicit delegation cannot complete a broad design map. Ask the next highest-impact question."
+		)
+	return planner_decision
+
+
+def broad_design_scope(scope):
+	return scope.get("scope_type") in {"structured_plan", "large_regime", "generic_structured_plan"}
+
+
+def weak_answers_for_broad_design(answers):
+	if not answers:
+		return False
+	answer_text = "\n".join(str(answer.get("answer") or "") for answer in answers if isinstance(answer, dict)).strip()
+	word_count = len(re.findall(r"\w+", answer_text))
+	delegation_terms = ("you decide", "decide for me", "make assumptions", "use your judgement", "figure out", "simple", "basic")
+	return word_count <= 8 and not any(term in answer_text.lower() for term in delegation_terms)
+
+
+def planner_ready_has_core_dimension_coverage(planner_decision):
+	reviewed = {review.dimension for review in planner_decision.dimension_reviews}
+	required_groups = [
+		{"scope", "scale"},
+		{"structure", "relationships"},
+		{"timing"},
+		{"naming"},
+		{"content"},
+		{"fields"},
+		{"assumptions"},
+	]
+	return all(reviewed.intersection(group) for group in required_groups)
+
+
+def planner_ready_relies_on_high_impact_assumptions(planner_decision):
+	important_reviews = [review for review in planner_decision.dimension_reviews if review.impact in {"high", "critical"}]
+	return any(review.status == "assumed" for review in important_reviews)
+
+
+def design_question_shapes_implementation_map(question):
+	if not question:
+		return False
+	text = f"{question.question_id} {question.question} {question.reason} {question.default_assumption or ''}".lower()
+	return any(term in text for term in (
+		"structure",
+		"hierarchy",
+		"tree",
+		"parent",
+		"child",
+		"children",
+		"level",
+		"template",
+		"instance",
+		"period",
+		"schedule",
+		"timing",
+		"scale",
+		"count",
+		"naming",
+		"assumption",
+	))
+
+
+def build_design_question_planner_prompt(prompt, scope, answers, information_map):
+	return (
+		f"Original prompt:\n{prompt}"
+		f"\n\nPrior user answers:\n{json.dumps(answers or [], default=str, indent=2)}"
+		f"\n\nClassified scope:\n{json.dumps(scope, default=str, indent=2)}"
+		f"\n\nCurrent information map:\n{information_map.model_dump_json(indent=2)}"
+		"\n\nYou are the dynamic information-map planner, not a template question generator. "
+		"There is no fixed question list and no fixed maximum question count. Ask as many or as few concise questions as the specific problem needs. "
+		"Before declaring ready, review the map dimensions explicitly: scope/scale, structure and relationships, templates versus generated instances, timing/scheduling, naming/readability, content/detail, DocType fields, assumptions, and security separation. "
+		"For each dimension, return a dimension_reviews item saying whether it is resolved by prompt/answers, safely assumed, explicitly delegated by the user, or still needs the user. "
+		"If any high-impact dimension still needs the user, status must be ask and ready_blockers must name the blocker. "
+		"A short answer like 'full body' usually resolves only one dimension; it must not make a broad design ready unless all other high-impact dimensions are resolved, safely assumed with reasons, or explicitly delegated. "
+		"If asking, ask exactly one prompt-specific question that resolves the highest-value remaining map gaps. Bundle related assumptions into that one question when efficient, but do not use canned IDs or old checklist wording. "
+		"If ready, explain the assumptions being made and which gaps those assumptions resolve. Security/permission questions are never asked here."
+	)
+
+
+def fallback_design_question_planner_decision(prompt, scope, answers, information_map):
+	"""Provider-failure fallback: never declare broad design ready after one answer."""
+	if broad_design_scope(scope) and weak_answers_for_broad_design(answers):
+		return DesignQuestionPlannerDecision(
+			status="ask",
+			reasoning_summary="The previous answer only resolved a narrow part of a broad design map.",
+			complexity_assessment="broad design still has unresolved implementation dimensions",
+			estimated_total_questions=max(2, len(answers or []) + 1),
+			ready_blockers=["Broad design still needs implementation-shaping details beyond the short answer."],
+			question=DesignQuestion(
+				question_id=f"dynamic_map_completion_{len(answers or []) + 1}",
+				phase="structure",
+				question="I have one design choice, but not enough to build the full structure well. What should I know about the schedule/period, parent-child tree, naming style, and level of detail before I generate the Actions?",
+				reason="Broad designs need enough scope, structure, timing, naming, and detail to create a useful Action tree instead of guessing the whole system from one short answer.",
+				options=[],
+				default_assumption="If you want me to decide, say so and I will make the remaining assumptions explicitly.",
+				required=True,
+			),
+		)
+	question = first_structural_unknown_question(information_map)
+	if question:
+		return DesignQuestionPlannerDecision(
+			status="ask",
+			reasoning_summary="Fallback asks only the highest-impact unresolved structure question.",
+			complexity_assessment="medium",
+			estimated_total_questions=1,
+			question=question,
+		)
+	return DesignQuestionPlannerDecision(
+		status="ready",
+		reasoning_summary="Fallback found no structural blocker.",
+		complexity_assessment="low",
+		estimated_total_questions=0,
+		dimension_reviews=[
+			DesignMapDimensionReview(dimension="scope", status="assumed", impact="medium", reason="Fallback could not reach the planner, and no structural unknown remained."),
+			DesignMapDimensionReview(dimension="scale", status="assumed", impact="medium", reason="Fallback uses the existing information-map scale model."),
+			DesignMapDimensionReview(dimension="structure", status="assumed", impact="medium", reason="Fallback uses the existing information-map structure model."),
+			DesignMapDimensionReview(dimension="relationships", status="assumed", impact="medium", reason="Fallback uses existing relationship requirements."),
+			DesignMapDimensionReview(dimension="timing", status="assumed", impact="medium", reason="Fallback uses existing timing assumptions."),
+			DesignMapDimensionReview(dimension="naming", status="assumed", impact="medium", reason="Fallback uses existing naming assumptions."),
+			DesignMapDimensionReview(dimension="content", status="assumed", impact="medium", reason="Fallback uses existing content assumptions."),
+			DesignMapDimensionReview(dimension="fields", status="assumed", impact="medium", reason="Fallback uses existing field intents."),
+			DesignMapDimensionReview(dimension="assumptions", status="assumed", impact="medium", reason="Fallback preserves already recorded assumptions."),
+		],
+	)
+
+
+def first_structural_unknown_question(information_map):
+	for unknown in information_map.unknowns:
+		if unknown.category in {"structure", "scope", "doctype", "fields", "timing", "naming", "content"}:
+			return DesignQuestion(
+				question_id=f"dynamic_{unknown.unknown_id}",
+				phase=design_question_phase_for_category(unknown.category),
+				question=unknown.question,
+				reason=unknown.reason,
+				options=unknown.options,
+				default_assumption=unknown.default_assumption,
+				required=True,
+			)
+	return None
+
+
+def apply_design_question_planner_decision(information_map, planner_decision):
+	updates = {}
+	assumptions = list(information_map.assumptions or [])
+	assumptions.extend(planner_decision.assumptions_to_make or [])
+	updates["assumptions"] = assumptions
+	updates["readiness"] = "needs_question" if planner_decision.status == "ask" else "ready"
+	updates["readiness_reason"] = planner_decision.reasoning_summary
+	budget = dict(information_map.question_budget or {})
+	budget["estimated_total_questions"] = planner_decision.estimated_total_questions
+	budget["planner_complexity_assessment"] = planner_decision.complexity_assessment
+	budget["planner_reasoning_summary"] = planner_decision.reasoning_summary
+	budget["strategy"] = "ai_dynamic_question_planner"
+	updates["question_budget"] = budget
+	if planner_decision.status == "ready":
+		updates["unknowns"] = [unknown.model_copy(update={"ask": False}) for unknown in information_map.unknowns]
+	return information_map.model_copy(update=updates)
+
+
+def build_design_information_map(prompt, scope, answers=None):
+	answers = answers or []
+	domain = scope["domain"]
+	scope_type = scope["scope_type"]
+	combined_answers = list(answers) + [{"question_id": "original_prompt", "answer": prompt}]
+	likely_range = estimate_design_scale(scope_type, domain, combined_answers)
+	question_budget = estimate_design_question_budget(prompt, scope, answers, likely_range)
+	assumptions = build_design_assumption_records(prompt, scope, answers)
+	assumptions.extend(strengthen_design_assumptions(prompt, scope, answers, question_budget))
+	unknowns = build_design_unknown_records(prompt, scope, answers, assumptions)
+	field_intents = build_design_field_intents(prompt, scope, answers, assumptions, unknowns)
+	doctype_strategy = build_design_doctype_strategy(scope, answers)
+	scale_model = build_design_scale_model(scope, combined_answers, likely_range)
+	structure_model = build_design_structure_model(scope, answers, assumptions)
+	content_model = build_design_content_model(scope, answers, assumptions)
+	time_model = build_design_time_model(scope, answers, assumptions)
+	naming_model = build_design_naming_model(scope, answers, assumptions)
+	implementation_requirements = build_design_implementation_requirements(
+		prompt,
+		scope,
+		doctype_strategy,
+		scale_model,
+		structure_model,
+		content_model,
+		time_model,
+		naming_model,
+		field_intents,
+	)
+	readiness = "needs_question" if scope_type in {"structured_plan", "large_regime", "generic_structured_plan"} or any(unknown.ask for unknown in unknowns) else "ready"
+	return DesignInformationMap(
+		goal=prompt,
+		domain=domain,
+		scope_type=scope_type,
+		target_doctype="Action",
+		question_budget=question_budget,
+		doctype_strategy=doctype_strategy,
+		scale_model=scale_model,
+		structure_model=structure_model,
+		content_model=content_model,
+		time_model=time_model,
+		naming_model=naming_model,
+		field_intents=field_intents,
+		implementation_requirements=implementation_requirements,
+		assumptions=assumptions,
+		unknowns=unknowns,
+		readiness=readiness,
+		readiness_reason="Broad design map needs AI planner review." if scope_type in {"structured_plan", "large_regime", "generic_structured_plan"} else "Map has enough scope, structure, assumptions, and field strategy for implementation.",
+	)
+
+
+def build_design_assumption_records(prompt, scope, answers):
+	answer_text = design_answer_text(answers)
+	assumptions = [
+		DesignAssumption(
+			assumption_id="action_doctype_strategy",
+			category="doctype",
+			statement="Use Action records with parent_action hierarchy for generated structures.",
+			reason="The current implementation target is Action and the sync layer resolves parent operation references.",
+			confidence=0.86,
+			impact="high",
+		),
+		DesignAssumption(
+			assumption_id="leaf_container_split",
+			category="structure",
+			statement="Container nodes are groups; concrete work items are leaf todo Actions.",
+			reason="This makes generated trees inspectable and executable without mixing headings and tasks.",
+			confidence=0.82,
+			impact="high",
+		),
+	]
+	if not any(term in f"{prompt} {answer_text}".lower() for term in ("calendar", "event", " at ", "am", "pm")):
+		assumptions.append(DesignAssumption(
+			assumption_id="default_unscheduled_todos",
+			category="timing",
+			statement="Generate planned todo Actions rather than calendar events unless explicit times are requested.",
+			reason="Most large structures should not flood the calendar unless the prompt asks for calendar scheduling.",
+			confidence=0.78,
+			impact="medium",
 		))
-	if not any(term in lower_prompt for term in ("until", "test", "exam", "revision", "study for")):
-		questions.append(DesignQuestion(
-			question_id="study_scope",
-			phase="scope",
-			question="What should this study setup actually cover: just study tasks, study plus revision, or the full path through test-writing milestones?",
-			reason="The prompt asks for a study structure but does not say how far the system should take the student.",
-			options=["Study tasks only", "Study plus revision", "Study plus revision plus test-writing milestones"],
-			default_assumption="Study plus revision plus test-writing milestones",
+	return assumptions
+
+
+def estimate_design_question_budget(prompt, scope, answers, likely_range):
+	answers = answers or []
+	text = f"{prompt or ''} {design_answer_text(answers)}".lower()
+	min_count, max_count = likely_range or (1, 5)
+	complexity_score = 0
+	complexity_score += 2 if scope.get("scope_type") == "large_regime" else 0
+	complexity_score += 1 if scope.get("scope_type") in {"structured_plan", "generic_structured_plan"} else 0
+	complexity_score += 2 if max_count >= 100 else 1 if max_count >= 40 else 0
+	complexity_score += sum(1 for term in ("template", "period", "schedule", "hierarchy", "under", "daily", "week", "subjects", "tests", "routine") if term in text)
+	low_detail_requested = any(phrase in text for phrase in (
+		"not much detail",
+		"simple",
+		"quick",
+		"rough",
+		"basic",
+		"just decide",
+		"you decide",
+		"decide for me",
+		"make assumptions",
+		"use your judgement",
+		"use your judgment",
+	))
+	assumption_review_requested = design_assumption_review_requested(prompt, answers)
+	asked_count = len([answer for answer in answers if not answer.get("inferred")])
+	return {
+		"complexity_score": complexity_score,
+		"likely_action_count_range": list(likely_range or []),
+		"asked_count": asked_count,
+		"question_limit": "ai_planner_decides",
+		"low_detail_requested": low_detail_requested,
+		"assumption_review_requested": assumption_review_requested,
+		"strategy": "ai_planner_decides_until_map_ready",
+		"reason": "Complexity is descriptive only. The AI planner decides how many questions are needed to complete the information map.",
+	}
+
+
+def strengthen_design_assumptions(prompt, scope, answers, question_budget):
+	text = f"{prompt or ''} {design_answer_text(answers)}".lower()
+	assumptions = []
+
+	def add(assumption_id, category, statement, reason, confidence=0.78, impact="medium"):
+		assumptions.append(DesignAssumption(
+			assumption_id=assumption_id,
+			category=category,
+			statement=statement,
+			reason=reason,
+			confidence=confidence,
+			impact=impact,
 		))
-	questions.append(
-		DesignQuestion(
-			question_id="study_detail_level",
-			phase="extent",
-			question="This could be a 15-action outline, a 50-action weekly regime, or a 150+ detailed daily system. Which level do you want?",
-			reason="Detail level is the biggest scope decision because it changes operation count, hierarchy depth, and how much the execution bus will create.",
-			options=["Lightweight overview", "Medium weekly plan", "Detailed daily system"],
-			default_assumption="Medium weekly plan",
+
+	should_strengthen = question_budget.get("low_detail_requested")
+	if not should_strengthen:
+		return assumptions
+	if not any(term in text for term in ("name", "naming", "called")):
+		add(
+			"strengthened_naming_rule",
+			"naming",
+			"Use clear generated names derived from the hierarchy, period/focus/group, and concrete activity.",
+			"The user did not specify naming, so the best auditable default is to derive names from structure rather than ask another question.",
+			0.82,
+			"medium",
 		)
-	)
-	questions.append(
-		DesignQuestion(
-			question_id="study_subjects",
-			phase="specifics",
-			question="Should I invent realistic fake university subjects, or do you want to provide the exact 5 subjects?",
-			reason="Subject names shape the parent Actions and the generated study/revision/test branches.",
-			options=["Invent fake subjects", "I will provide subjects"],
-			default_assumption="Invent fake subjects",
+	if not any(term in text for term in ("description", "detail", "instruction", "specific")):
+		add(
+			"strengthened_description_depth",
+			"content",
+			"Use short practical descriptions that explain what each generated Action is for without overloading the tree.",
+			"The user did not request deep field detail, so concise descriptions are more useful than asking another question.",
+			0.76,
+			"medium",
 		)
-	)
-	questions.extend(study_dynamic_subject_questions(scope))
-	questions.append(
-		DesignQuestion(
-			question_id="study_horizon",
-			phase="extent",
-			question="How long should the regime run before the test-writing stage?",
-			reason="Time horizon changes the number of weekly/daily study Actions and the spacing of revision/test milestones.",
-			options=["4 weeks", "6 weeks", "8 weeks"],
-			default_assumption="6 weeks",
+	if not any(term in text for term in ("calendar", "event", "am", "pm", "specific time", "at ")):
+		add(
+			"strengthened_timing_rule",
+			"timing",
+			"Use planned todo Actions by default; schedule only the structure or descriptions unless explicit calendar times are requested.",
+			"Large generated systems should avoid flooding the calendar unless the prompt asks for concrete event times.",
+			0.78,
+			"medium",
 		)
-	)
-	questions.append(
-		DesignQuestion(
-			question_id="study_structure",
-			phase="structure",
-			question="Which hierarchy should I use for the Action tree: subject-first, week-first, or hybrid university → subject → weeks → tests?",
-			reason="The hierarchy determines parent/child Action structure.",
-			options=["Subject-first", "Week-first", "Hybrid"],
-			default_assumption="Hybrid",
+	if scope.get("scope_type") in {"structured_plan", "large_regime", "generic_structured_plan"} and not any(term in text for term in ("template", "period", "parent", "child", "under", "hierarchy", "structure", "tree")):
+		add(
+			"strengthened_structure_rule",
+			"structure",
+			"Use an inspectable parent group → meaningful subgroups → concrete Action leaves structure.",
+			"For broad design requests, this structure is the safest default when the user does not specify tree shape and the question budget is low.",
+			0.74,
+			"high",
 		)
-	)
-	questions.append(
-		DesignQuestion(
-			question_id="study_naming_rules",
-			phase="specifics",
-			question="Do you want specific naming rules for the generated Actions, or should I use clear generated names?",
-			reason="Large plans create many records, so naming rules affect how easy the Action tree is to inspect later.",
-			options=["Use clear generated names", "I will provide naming rules"],
-			default_assumption="Use clear generated names",
-		)
-	)
-	questions.extend(study_dynamic_detail_questions(scope))
-	return questions
+	return assumptions
 
 
-def has_incomplete_at_least_constraint(lower_prompt):
-	return bool(re.search(r"\bat\W*least\s*$", lower_prompt or ""))
+def apply_question_budget_to_unknowns(unknowns, question_budget):
+	remaining = question_budget.get("remaining_questions", 0)
+	if remaining <= 0:
+		return [unknown.model_copy(update={"ask": False}) for unknown in unknowns]
+	askable = [unknown for unknown in unknowns if unknown.ask]
+	kept_ids = {unknown.unknown_id for unknown in askable[:remaining]}
+	return [
+		unknown if unknown.unknown_id in kept_ids else unknown.model_copy(update={"ask": False})
+		for unknown in unknowns
+	]
 
 
-def study_dynamic_subject_questions(scope):
-	return [DesignQuestion(
-		question_id="study_subject_names",
-		phase="specifics",
-		question="Please provide the 5 subject names, separated by commas.",
-		reason="You chose to provide subjects, so I need the names before building the subject parent Actions.",
-		default_assumption=None,
-	)] if study_subject_names_are_needed(scope) else []
+def build_design_unknown_records(prompt, scope, answers, assumptions):
+	unknowns = []
+	answer_text = design_answer_text(answers)
+	review_assumptions = design_assumption_review_requested(prompt, answers)
+	assumption_text = " ".join(assumption.statement for assumption in assumptions or []).lower()
+
+	def answered_or_implied(*terms):
+		text = f"{prompt} {answer_text} {assumption_text}".lower()
+		return any(term in text for term in terms)
+
+	def prompt_or_answer_implies(*terms):
+		text = f"{prompt} {answer_text}".lower()
+		return any(term in text for term in terms)
+
+	def explicit_structure_described():
+		return prompt_or_answer_implies("template", "period", "under", "parent", "child", "children", "hierarchy", "structure", "tree", "group", "phase", "copy", "repeat")
+
+	def add(unknown_id, category, question, reason, impact, default_assumption=None, options=None, ask=True):
+		if design_answer_for(answers, unknown_id, include_inferred=False):
+			return
+		unknowns.append(DesignUnknown(
+			unknown_id=unknown_id,
+			category=category,
+			question=question,
+			reason=reason,
+			impact=impact,
+			default_assumption=default_assumption,
+			options=options or [],
+			ask=ask,
+		))
+
+	if scope["scope_type"] in {"structured_plan", "large_regime", "generic_structured_plan"}:
+		if not explicit_structure_described():
+			add(
+				"structure_model",
+				"structure",
+				"What structure should the generated records have? Include parent/child levels, reusable templates, periods, or grouping rules if they matter.",
+				"Structure changes the Action tree and cannot be safely guessed for broad design requests.",
+				"high",
+				"Use a clear parent → group → concrete Action tree",
+				ask=True,
+			)
+		if not answered_or_implied("name", "naming", "called", "random") and review_assumptions:
+			add(
+				"naming_rules",
+				"naming",
+				"What naming rule should generated records follow, or may I use clear generated names from the structure?",
+				"Naming affects whether large generated trees are readable and auditable.",
+				"medium",
+				"Use clear generated names from the structure",
+				ask=True,
+			)
+		if not answered_or_implied("time", "timing", "schedule", "calendar", "am", "pm", "morning", "evening", "when") and review_assumptions:
+			add(
+				"timing_model",
+				"timing",
+				"What timing assumptions should be used: unscheduled todos, scheduled parent blocks, or dated child Actions?",
+				"Timing affects start/end fields and whether generated records appear as calendar events.",
+				"medium",
+				"Use unscheduled todos unless specific times are implied",
+				ask=True,
+			)
+		if not answered_or_implied("description", "detail", "instruction", "sets", "steps", "specific") and review_assumptions:
+			add(
+				"content_detail_model",
+				"content",
+				"How detailed should each generated Action description be?",
+				"Description depth changes field content and operation scale for large designs.",
+				"medium",
+				"Short practical descriptions",
+				ask=True,
+			)
+	return prioritize_design_unknowns(unknowns)
 
 
-def study_dynamic_detail_questions(scope):
-	answer_text = design_answer_text(scope.get("answers", []))
-	if "detailed daily" not in answer_text:
+def identify_design_questions_from_map(information_map):
+	information_map = DesignInformationMap.model_validate(information_map)
+	question = next((unknown for unknown in information_map.unknowns if unknown.ask), None)
+	if not question:
 		return []
 	return [DesignQuestion(
-		question_id="study_daily_workload",
-		phase="extent",
-		question="For a detailed daily system, how much study workload should I assume per day?",
-		reason="Daily workload changes how many concrete study Actions should be generated each day.",
-		options=["1 hour/day", "2 hours/day", "3 hours/day", "Flexible"],
-		default_assumption="2 hours/day",
+		question_id=question.unknown_id,
+		phase=design_question_phase_for_category(question.category),
+		question=question.question,
+		reason=question.reason,
+		options=question.options,
+		default_assumption=question.default_assumption,
+		required=True,
 	)]
 
 
-def study_subject_names_are_needed(scope):
-	answers = scope.get("answers", [])
-	answer = design_answer_for(answers, "study_subjects")
-	provided_names = design_answer_for(answers, "study_subject_names")
-	if len([part for part in re.split(r"[,;\n]", provided_names) if part.strip()]) >= 5:
-		return False
-	if not answer:
-		return False
-	lower_answer = answer.lower()
-	if "provide" not in lower_answer and "i will" not in lower_answer:
-		return False
-	return len([part for part in re.split(r"[,;\n]", answer) if part.strip()]) < 5
+def prioritize_design_unknowns(unknowns):
+	impact_score = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+	return sorted(unknowns, key=lambda unknown: (not unknown.ask, -impact_score.get(unknown.impact, 0), unknown.unknown_id))
 
 
-def design_answer_for(answers, question_id):
-	for answer in answers or []:
-		if answer.get("question_id") == question_id:
-			return str(answer.get("answer") or "")
-	return ""
+def design_question_phase_for_category(category):
+	return {
+		"scope": "scope",
+		"structure": "structure",
+		"content": "specifics",
+		"naming": "specifics",
+		"timing": "extent",
+		"fields": "specifics",
+		"doctype": "assumptions",
+	}.get(category, "assumptions")
 
 
-def design_answer_text(answers):
-	return " ".join(str(answer.get("answer") or "") for answer in answers or []).lower()
+def build_design_doctype_strategy(scope, answers):
+	return {
+		"doctype": "Action",
+		"hierarchy_field": "parent_action",
+		"group_field": "is_group",
+		"concrete_work_field": "todo",
+		"calendar_field": "event",
+	}
 
 
-def workout_design_questions(scope, prompt=None):
-	lower_prompt = (prompt or "").lower()
-	questions = [
-	]
-	if not any(term in lower_prompt for term in ("routine", "weekly", "daily", "each day", "workout plan")):
-		questions.append(
-			DesignQuestion(
-				question_id="workout_scope",
-				phase="scope",
-				question="When you say workout, do you want a single routine, a full weekly routine, or a progressive multi-week program?",
-				reason="The prompt does not yet reveal how large the workout system should be.",
-				options=["Simple routine", "Full weekly routine", "Progressive multi-week program"],
-				default_assumption="Full weekly routine",
-			)
-		)
-	questions.extend([
-		DesignQuestion(
-			question_id="workout_detail_level",
-			phase="extent",
-			question="Should I make this a day-level workout plan, or break each day into concrete exercise Actions under that day's parent Action?",
-			reason="This decides whether the output is a small structure or a full Action tree you can inspect and execute.",
-			options=["Simple weekly plan", "Daily plan", "Detailed exercise-by-exercise plan"],
-			default_assumption="Daily plan",
-		),
-		DesignQuestion(
-			question_id="workout_goal",
-			phase="scope",
-			question="What should I optimize the generated workouts for: general fitness, strength, weight loss, endurance, or mobility?",
-			reason="The goal changes the exercise choices and the way the child Actions are named.",
-			options=["General fitness", "Strength", "Weight loss", "Endurance", "Mobility"],
-			default_assumption="General fitness",
-		),
-		DesignQuestion(
-			question_id="workout_equipment",
-			phase="assumptions",
-			question="Should I assume bodyweight only, gym equipment, or mixed equipment?",
-			reason="Equipment assumptions affect which workout Actions make sense.",
-			options=["Bodyweight only", "Gym equipment", "Mixed"],
-			default_assumption="Bodyweight only",
-		),
-		DesignQuestion(
-			question_id="workout_structure",
-			phase="structure",
-			question="I plan to use routine parent → day parent Actions → exercise child Actions. Is that the structure you want?",
-			reason="This confirms the tree structure before creating parent/child Action operations.",
-			options=["Yes", "No, use a different structure"],
-			default_assumption="Yes",
-		),
-	])
-	return questions
+def build_design_scale_model(scope, answers, likely_range):
+	requested_count = extract_requested_action_count(design_answer_text(answers))
+	return {
+		"likely_action_count_range": list(likely_range),
+		"requested_count": requested_count or None,
+		"reason": "Scale is estimated from prompt scope, explicit counts, and answered detail level.",
+	}
 
 
-def generic_design_questions(scope, prompt=None):
-	return [
-		DesignQuestion(
-			question_id="generic_scope",
-			phase="scope",
-			question="I can see this is a structured build request, but not the domain yet. What should I treat as the main object or area being planned?",
-			reason="Before creating an Action tree, the system needs the real domain/object, not a generic template.",
-			options=["Main goal only", "Full structure", "Full structure plus detailed steps"],
-			default_assumption="Full structure",
-		),
-		DesignQuestion(
-			question_id="generic_detail_level",
-			phase="extent",
-			question="How detailed should this structured plan be: lightweight, medium, or detailed?",
-			reason="Detail level determines approximate operation count and hierarchy depth.",
-			options=["Lightweight", "Medium", "Detailed"],
-			default_assumption="Medium",
-		),
-		DesignQuestion(
-			question_id="generic_structure",
-			phase="structure",
-			question="Should I use parent Actions for main areas and child Actions for the detailed steps?",
-			reason="This defines the Action tree structure.",
-			options=["Yes", "No"],
-			default_assumption="Yes",
-		),
-	]
+def build_design_structure_model(scope, answers, assumptions):
+	answer_text = design_answer_text(answers)
+	structure_answers = answers_for_design_category(answers, "structure")
+	structure_answer = "\n".join(structure_answers) or None
+	structural_terms = extract_structural_terms(answer_text)
+	if "subject-first" in answer_text:
+		structure = "subject-first"
+	elif "time-first" in answer_text:
+		structure = "time-first"
+	elif "template" in answer_text and any(term in answer_text for term in ("period", "instance", "copy", "repeat", "schedule")):
+		structure = "reusable template layer → generated period/instance groups → concrete Actions"
+	elif structural_terms:
+		structure = " → ".join(structural_terms[:4]) + " → concrete Actions"
+	else:
+		structure = "hybrid parent → domain groups → time/detail groups → concrete Actions"
+	return {
+		"structure": structure,
+		"parent_groups": True,
+		"children_are_todos": True,
+		"structure_answer": structure_answer,
+		"structural_terms": structural_terms,
+		"relationship_terms": extract_relationship_terms(answer_text),
+		"template_layer_requested": "template" in answer_text or "reusable" in answer_text,
+		"period_or_instance_layer_requested": any(term in answer_text for term in ("period", "week", "month", "day", "daily", "copy", "repeat", "schedule", "instance")),
+	}
+
+
+def build_design_content_model(scope, answers, assumptions):
+	detail_answers = answers_for_design_category(answers, "content") + answers_for_design_category(answers, "fields")
+	naming_detail = design_answer_for(answers, "workout_naming_and_detail") or design_answer_for(answers, "workout_execution_detail") or "\n".join(detail_answers) or None
+	return {
+		"domain": scope["domain"],
+		"source": "generated_or_inferred",
+		"answers": answers,
+		"content_assumptions": [assumption.statement for assumption in assumptions if assumption.category == "content"],
+		"naming_and_detail_answer": naming_detail,
+		"ordered_content_requested": bool(naming_detail) and any(term in naming_detail.lower() for term in ("right order", "order", "sequence", "precedence", "first", "then", "copy and paste")),
+		"detail_terms": extract_content_detail_terms(naming_detail or design_answer_text(answers)),
+	}
+
+
+def build_design_time_model(scope, answers, assumptions):
+	answer_text = design_answer_text(answers)
+	timing_requested = any(term in answer_text for term in ("right time", "when each", "schedule", "calendar", "period", "week", "daily", "every", "morning", "evening")) or bool(re.search(r"\b(?:am|pm)\b", answer_text))
+	return {
+		"scheduling_style": "todos_not_calendar_events",
+		"default_status": "Upcoming",
+		"timing_assumptions": [assumption.statement for assumption in assumptions if assumption.category == "timing"],
+		"period_answer": "\n".join(answers_for_design_category(answers, "timing") + answers_for_design_category(answers, "structure")) or None,
+		"schedule_pattern": infer_schedule_pattern_from_text(answer_text),
+		"practical_timing_required": timing_requested,
+		"timing_terms": extract_timing_terms(answer_text),
+	}
+
+
+def build_design_naming_model(scope, answers, assumptions):
+	answer = design_answer_for(answers, "workout_naming_and_detail") or design_answer_for(answers, "naming_rules")
+	return {
+		"strategy": answer or "clear_generated_names",
+		"assumptions": [assumption.statement for assumption in assumptions if assumption.category == "naming"],
+	}
+
+
+def build_design_implementation_requirements(prompt, scope, doctype_strategy, scale_model, structure_model, content_model, time_model, naming_model, field_intents):
+	requirements = []
+	add_design_requirement(requirements, "target_doctype", "doctype", f"Implementation must create or interact with {doctype_strategy.get('doctype', 'Action')} records using the mapped DocType strategy.", [doctype_strategy.get("doctype"), doctype_strategy.get("hierarchy_field"), doctype_strategy.get("group_field")], "Use the target DocType fields and relationship fields from the information map.")
+	if scale_model.get("requested_count"):
+		add_design_requirement(requirements, "requested_count", "scope", f"Implementation must preserve the requested scale of about {scale_model.get('requested_count')} concrete Actions unless security or validation blocks it.", [str(scale_model.get("requested_count")), "count", "scale"], "Set target counts/templates so deterministic expansion can reach the requested scale.")
+	if scope.get("scope_type") != "simple_action" and structure_model.get("structure"):
+		add_design_requirement(requirements, "structure_shape", "structure", f"Implementation must preserve this structure: {structure_model.get('structure')}.", [structure_model.get("structure"), *(structure_model.get("structural_terms") or [])], "Represent the structure with parent groups, child groups, template variables, or relationship fields.")
+	if structure_model.get("template_layer_requested"):
+		add_design_requirement(requirements, "template_layer", "template", "Implementation must preserve the requested reusable/template layer instead of flattening directly to leaf records.", ["template", "reusable", "copy", "repeat"], "Use blueprint groups/templates/notes to distinguish reusable pattern from generated instances.")
+	if structure_model.get("period_or_instance_layer_requested"):
+		add_design_requirement(requirements, "period_instance_layer", "relationship", "Implementation must preserve the requested period/instance layer for generated records.", ["period", "instance", "day", "week", "schedule", "repeat"], "Use groups or template variables for periods, days, sessions, or repeated instances when the map contains them.")
+	if structure_model.get("relationship_terms"):
+		add_design_requirement(requirements, "relationship_terms", "relationship", "Implementation must preserve explicit relationship and ordering terms from the user answers.", structure_model.get("relationship_terms"), "Map relationship terms into parent links, group hierarchy, ordering, descriptions, or template variables.")
+	if time_model.get("practical_timing_required"):
+		add_design_requirement(requirements, "practical_timing", "timing", "Implementation must preserve practical timing and scheduling assumptions instead of relying only on compiler defaults.", time_model.get("timing_terms") or ["time", "schedule", "when"], "Represent timing in names, descriptions, template variables, or Action start/end fields as appropriate.")
+	if content_model.get("ordered_content_requested"):
+		add_design_requirement(requirements, "ordered_content", "content", "Implementation must preserve requested sequence/order/precedence in generated record names or descriptions.", ["order", "sequence", "first", "then", *(content_model.get("detail_terms") or [])], "Encode order in generated names, descriptions, or template variables.")
+	if naming_model.get("strategy") and naming_model.get("strategy") != "clear_generated_names":
+		add_design_requirement(requirements, "naming_strategy", "naming", f"Implementation must preserve the naming strategy: {naming_model.get('strategy')}.", [naming_model.get("strategy"), "name", "naming"], "Reflect naming strategy in name patterns and generated record titles.")
+	for intent in field_intents:
+		if intent.value_strategy in {"user_provided", "inferred", "assumed"} and intent.value not in (None, ""):
+			add_design_requirement(requirements, f"field_{intent.fieldname}", "fields", f"Implementation should preserve {intent.label or intent.fieldname} field intent as {intent.value!r} where relevant.", [intent.fieldname, intent.label, str(intent.value)], "Set or explain this field in blueprint templates, groups, or compiled operations.", must_preserve=False)
+	return requirements
+
+
+def add_design_requirement(requirements, requirement_id, category, description, evidence, blueprint_hint, must_preserve=True):
+	requirements.append(DesignImplementationRequirement(
+		requirement_id=requirement_id,
+		category=category,
+		description=description,
+		evidence=[str(item) for item in evidence or [] if item],
+		must_preserve=must_preserve,
+		blueprint_hint=blueprint_hint,
+		validation_terms=list(dict.fromkeys(term for item in evidence or [] for term in extract_contract_terms(item))),
+	))
+
+
+def answers_for_design_category(answers, category):
+	return [str(answer.get("answer") or "") for answer in answers or [] if design_question_category_for_id(answer.get("question_id")) == category and answer.get("answer")]
+
+
+def design_question_category_for_id(question_id):
+	question_id = str(question_id or "").lower()
+	if any(term in question_id for term in ("structure", "hierarchy", "tree", "scope")):
+		return "structure"
+	if any(term in question_id for term in ("time", "timing", "schedule", "horizon", "period")):
+		return "timing"
+	if any(term in question_id for term in ("name", "naming", "detail", "description")):
+		return "naming"
+	if any(term in question_id for term in ("field", "doctype")):
+		return "fields"
+	return "content"
+
+
+def extract_structural_terms(text):
+	terms = []
+	for term in ("template", "period", "week", "day", "session", "phase", "subject", "topic", "module", "milestone", "focus", "category", "group", "test", "revision"):
+		if term in (text or ""):
+			terms.append(term)
+	return list(dict.fromkeys(terms))
+
+
+def extract_relationship_terms(text):
+	terms = []
+	for term in ("under", "parent", "child", "children", "before", "after", "precedence", "first", "second", "then", "copy", "paste", "repeat", "cycle", "cycling", "every", "per"):
+		if term in (text or ""):
+			terms.append(term)
+	return list(dict.fromkeys(terms))
+
+
+def extract_content_detail_terms(text):
+	terms = []
+	for term in ("description", "detail", "instruction", "order", "sequence", "specific", "practical", "step", "test", "revision", "exercise", "subject"):
+		if term in (text or ""):
+			terms.append(term)
+	return list(dict.fromkeys(terms))
+
+
+def extract_timing_terms(text):
+	terms = []
+	for term in ("time", "timing", "schedule", "calendar", "period", "week", "day", "daily", "morning", "afternoon", "evening", "night", "am", "pm", "every", "right time"):
+		if term in (text or ""):
+			terms.append(term)
+	return list(dict.fromkeys(terms))
+
 
 
 def build_system_assumptions_for_design(scope, answers=None):
-	assumptions = [
+	return [
 		"Use Action records for the generated structure.",
 		"Use parent_action links for hierarchy.",
 		"Use is_group=1 for container Actions and todo=1 for concrete work Actions.",
 		"Use event=0 unless the user explicitly asks for calendar scheduling.",
 		"Use status='Upcoming' for new planned Actions.",
 	]
-	if scope["domain"] == "study":
-		assumptions.extend([
-			"Create a top study-regime parent Action.",
-			"Create test milestone Actions for each subject.",
-		])
-	elif scope["domain"] == "workout":
-		assumptions.extend([
-			"Create a top exercise-routine parent Action.",
-			"Create daily workout parent Actions with exercise child Actions.",
-		])
-	return assumptions
 
 
 def next_design_question(plan):
@@ -4970,20 +5309,56 @@ def design_interview_is_complete(plan):
 def compile_design_brief(prompt, plan, answers):
 	plan = DesignQuestionPlan.model_validate(plan)
 	answers = answers or []
+	information_map = plan.information_map or build_design_information_map(
+		prompt,
+		{
+			"scope_type": plan.scope_type,
+			"domain": plan.domain,
+			"likely_action_count_range": plan.likely_action_count_range,
+			"answers": answers,
+		},
+		answers,
+	)
 	answer_lines = [f"{answer.get('question_id')}: {answer.get('answer')}" for answer in answers]
+	map_json = information_map.model_dump_json(indent=2)
 	return {
 		"design_type": plan.scope_type,
 		"domain": plan.domain,
 		"likely_action_count_range": list(plan.likely_action_count_range),
 		"answers": answers,
 		"system_assumptions": plan.system_assumptions,
+		"information_map": information_map.model_dump(mode="json"),
 		"clarified_prompt": (
-			f"{prompt}\n\nProgressive design interview answers:\n"
+			f"{prompt}\n\nDesign information map:\n{map_json}\n\nProgressive design interview answers:\n"
 			+ "\n".join(answer_lines)
 			+ "\n\nSystem assumptions:\n"
 			+ "\n".join(f"- {assumption}" for assumption in plan.system_assumptions)
 		),
 	}
+
+
+def run_preview_clarification_stage(state):
+	prompt = (
+		f"Original input:\n{state.input.model_dump_json()}"
+		f"\n\nSystem context:\n{to_jsonable_python(SYSTEM_CONTEXT)}"
+		f"\n\nCurrent datetime:\n{_now().isoformat()}"
+		f"\n\nInformation already collected:\n{to_jsonable_python(state.information)}"
+		"\n\nPreview pipeline: clarify once. If the prompt includes a Design information map, "
+		"treat that map and the progressive interview answers as clarification context."
+	)
+	result = _run_agent_sync_with_retry(
+		get_clarification_agent(),
+		prompt=prompt,
+		deps=state,
+		conversation_id=state.orchestration_id,
+	)
+	if isinstance(result.output, UserClarification):
+		state.user_clarification = result.output
+		state.stage = "waiting_for_user"
+		return result.output
+	state.clarification = result.output
+	state.stage = "route_selection"
+	return run_preview_assumption_review(state, result.output)
 
 
 def run_preview_assumption_review(state, clarification):

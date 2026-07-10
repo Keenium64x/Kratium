@@ -79,6 +79,18 @@ Clarification boundary:
 Progressive design interview:
 - large structured prompts can run a one-question-at-a-time interview before route selection;
 - simple batch operation prompts such as “create 10 actions then delete 3” skip the interview and go straight to orchestration/security;
+- the interview now builds a `DesignInformationMap` before choosing a question;
+- active question choice is owned by `DesignQuestionPlannerDecision`, an AI planning station, not by a hardcoded naming/timing/content checklist;
+- deterministic map code may estimate scope, extract obvious terms, validate outputs, and provide provider-failure fallback, but normal question wording and readiness decisions should come from the AI planner;
+- broad design prompts with no prior design answer and a high-impact map gap must ask one implementation-map question before blueprinting, unless the user explicitly says to decide/make assumptions/simple;
+- the first design question must shape implementation structure such as hierarchy, parent/child levels, reusable templates vs generated instances, scale, timing/scheduling, naming, or assumptions; preference-only questions are rejected and retried;
+- the map records goal, domain, scope, scale model, structure model, content model, timing model, naming model, DocType strategy, field intents, assumptions, unknowns, and readiness;
+- the map now also records generic `implementation_requirements`; these are the contract the blueprint must preserve, replacing hardcoded workout/study validators;
+- assumptions are explicit records with confidence, impact, category, and reason, rather than hidden defaults;
+- question selection is driven by high-impact map unknowns instead of a fixed checklist;
+- if the user explicitly asks to review assumptions, the map stops treating inferred answers as final for those assumptions and asks compact bundled questions until the important structure/content/timing/naming choices are recorded;
+- broad design requests should resolve structure, naming, timing, content detail, and field assumptions through the generic information-map unknown/requirement mechanism, not prompt-specific routes;
+- relevant Action field intents are mapped from DocType metadata where available, then marked as user-provided, inferred, assumed, ask, or skip;
 - the interview first classifies scope/domain and estimates likely Action count range;
 - before asking, the interview infers high-confidence scope/detail/structure/assumption answers directly from the prompt and adds them to the design brief;
 - large regimes still ask high-impact scope questions such as minimum size, detail level, horizon, hierarchy, and naming when those decisions materially change operation count or Action tree shape;
@@ -86,7 +98,7 @@ Progressive design interview:
 - each answer is stored, then the next question plan is recalculated so later questions can depend on earlier answers;
 - AI Execution Console stores `question_plan`, `question_answers`, and `active_question_id` as hidden JSON/data fields;
 - AI Execution Console rechecks stored `question_plan` before processing; stale interview state for prompts that now classify as simple batch operations is cleared and rerouted to execution/security;
-- once the interview is complete, a design brief with answers and system assumptions is appended to the prompt sent into orchestration.
+- once the interview is complete, a design brief with answers, system assumptions, and the information map is appended to the prompt sent into orchestration/blueprint implementation.
 
 ### Execution Bus
 
@@ -137,10 +149,12 @@ Important boundary:
 Action implementation model:
 - Action-building requests now use an Action blueprint station before atomic operation compilation;
 - the AI produces a compact `ActionImplementationBlueprint` with groups, repeated templates, target count, assumptions, and implementation notes;
+- the blueprint station treats `information_map.implementation_requirements` as the implementation contract and must preserve those requirements through groups, templates, variables, assumptions, or notes;
 - deterministic compiler code expands that blueprint into one `doctype.create` operation per Action record;
 - template variables such as subject/week/activity become concrete names and may become real parent group Actions;
 - abstract blueprint groups containing placeholders are not synced as literal placeholder records;
 - this is the default Action creation path, not a special study/workout shortcut;
+- do not add domain-specific validator/normalizer code to force a test prompt shape; add generic map requirements instead;
 - the older one-shot `ImplementationDesign` model remains as fallback for non-Action or unsupported operation-family work.
 
 ### Tools
@@ -207,3 +221,19 @@ For each pass:
 5. update `docs/USER_CAPABILITY_INDEX.md` when new concepts need tracking.
 
 Do not reread the whole input-system file unless absolutely necessary.
+
+## 2026-07-09 Clarification Planner Readiness Gate
+
+Design-interview readiness is now owned by the AI planner plus a generic completeness gate, not by a fixed question budget.
+
+Planner station contract:
+- input: original prompt, prior answers, classified scope, current `DesignInformationMap`;
+- output: `DesignQuestionPlannerDecision` with either one next question or a ready decision;
+- decision: whether map dimensions are resolved, safely assumed, explicitly delegated, or still need the user;
+- handoff: `apply_design_question_planner_decision` updates map readiness and passes the completed map to route/blueprint planning.
+
+Generic readiness rules:
+- broad designs cannot become ready just because one short answer was provided;
+- a weak answer without delegation becomes another concise map-completion question;
+- ready decisions must include dimension reviews for scope/scale, structure/relationships, timing, naming, content, fields, and assumptions;
+- security remains outside clarification and belongs to execution/security approval.
